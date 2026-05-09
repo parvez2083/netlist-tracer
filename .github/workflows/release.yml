@@ -1,0 +1,44 @@
+# PyPI publish setup — TWO paths supported (DISPUTE_2 resolution v2):
+#
+# PRIMARY: Trusted Publishing (no secrets required). Setup once:
+#   1. Claim project name on PyPI: https://pypi.org/manage/account/publishing/
+#   2. Add 'pending publisher' for: owner=parvez2083, repo=netlist-tracer,
+#      workflow=release.yml, environment=pypi
+#   3. Create 'pypi' environment in repo settings (Settings -> Environments)
+#
+# FALLBACK: Token-based publish. Setup once:
+#   1. Generate API token on PyPI: https://pypi.org/manage/account/token/
+#   2. Add as GitHub Actions secret named PYPI_API_TOKEN (Settings -> Secrets)
+#   When this secret is present, the workflow uses it instead of trusted publishing.
+#
+# In both cases: tag a release to trigger:
+#   git tag v0.1.0 && git push origin v0.1.0
+# This workflow is DORMANT until step 4 of either setup path completes.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # required for trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --upgrade pip build
+      - run: python -m build
+      - name: Publish via trusted publishing
+        if: ${{ secrets.PYPI_API_TOKEN == '' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Publish via API token
+        if: ${{ secrets.PYPI_API_TOKEN != '' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
