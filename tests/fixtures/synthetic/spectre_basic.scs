@@ -1,0 +1,12 @@
+// Synthetic Spectre fixture: basic netlist
+subckt nand2_spectre (Y A B VDD VSS)
+    parameters W=2u L=1u
+    M1 (Y A VDD VDD) pmos W=W L=L
+    M2 (Y B VDD VDD) pmos W=W L=L
+    M3 (Y A N VSS) nmos W=W L=L
+    M4 (N B VSS VSS) nmos W=W L=L
+ends nand2_spectre
+
+subckt top_spectre (VDD VSS A B Y)
+    X1 (Y A B VDD VSS) nand2_spectre
+ends top_spectre

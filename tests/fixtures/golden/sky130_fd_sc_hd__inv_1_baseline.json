@@ -1,0 +1,36 @@
+{
+  "fixture": "sky130_fd_sc_hd__inv_1.spice",
+  "parser": {
+    "format": "spice",
+    "subckt_count": 1,
+    "subckt_names_sorted": [
+      "sky130_fd_sc_hd__inv_1"
+    ],
+    "subckts": {
+      "sky130_fd_sc_hd__inv_1": {
+        "alias_count": 0,
+        "child_instance_count": 2,
+        "pin_count": 6,
+        "pins": [
+          "A",
+          "VGND",
+          "VNB",
+          "VPB",
+          "VPWR",
+          "Y"
+        ]
+      }
+    },
+    "total_instance_count": 2
+  },
+  "source_url": "https://raw.githubusercontent.com/google/skywater-pdk-libs-sky130_fd_sc_hd/main/cells/inv/sky130_fd_sc_hd__inv_1.spice",
+  "trace": {
+    "max_depth": null,
+    "paths": [],
+    "raw_path_count": 0,
+    "start_cell": "sky130_fd_sc_hd__inv_1",
+    "start_pin": "A",
+    "unique_path_count": 0
+  },
+  "vendored_sha": "ac7fb61f06e6470b94e8afdf7c25268f62fbd7b1"
+}

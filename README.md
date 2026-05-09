@@ -1,0 +1,195 @@
+# nettrace
+
+**Multi-format netlist parser and bidirectional hierarchical signal tracer**
+
+Parse and analyze semiconductor netlists across CDL, SPICE, Spectre, Verilog, and SystemVerilog formats with automatic format detection. Trace signals bidirectionally through the design hierarchy, resolving aliases and identifying connectivity paths.
+
+## Features
+
+- **Multi-format auto-detection**: CDL, SPICE, Spectre, Verilog, SystemVerilog
+- **Bidirectional hierarchical tracing**: trace signals up and down the design tree with per-bit alias resolution
+- **Parameter specialization**: expand parameterized instances with mangled cell variants
+- **Concat-form decomposition**: decompose multi-bit vectors into per-bit assignment paths
+- **Supply-net safety**: detect and label power/ground connectivity
+- **Constant-tie optimization**: resolve tied nets to constant values
+- **JSON cache fast-path**: serialize parsed netlists for rapid re-use
+
+## Install
+
+```bash
+pip install -e .
+```
+
+Note: PyPI publish is not yet available. Clone the repository and install from source.
+
+## Quickstart
+
+### Parse a netlist
+
+```python
+from nettrace import NetlistParser
+
+# Automatic format detection
+parser = NetlistParser("design.v")  # or .sp, .cdl, .scs
+
+print(f"Format: {parser.format}")
+print(f"Subcircuits: {len(parser.subckts)}")
+print(f"Instances: {sum(len(v) for v in parser.instances_by_parent.values())}")
+```
+
+### Trace a signal
+
+```python
+from nettrace import NetlistParser, BidirectionalTracer, format_path
+
+parser = NetlistParser("inverter.spice")
+tracer = BidirectionalTracer(parser)
+
+# Trace from input pin A to all endpoints
+paths = tracer.trace("inv_1", "A")
+
+for path in paths:
+    print(format_path(path))
+```
+
+### Understanding the trace output
+
+Each trace path is rendered as a sequence of `cell|instance|pin` tokens separated by ` -- `. The diagram below maps two example traces onto a small hierarchy:
+
+![Trace path notation](docs/images/trace_path_notation.png)
+
+```
+topCell|<internal>|pin0 -- Cell1|X1|pin1 -- Cell11|X1/X11|pin11
+Cell11|X1/X11|pinA -- Cell1|X1|pinB -- topCell|<internal>|net0 -- Cell2|X2|pinC -- Cell21|X2/X21|pinD
+```
+
+Notation:
+- `cell` — the cell type (definition) the step is inside
+- `instance` — hierarchical instance path (e.g. `X1/X11` means instance `X11` inside instance `X1`); `<internal>` denotes the top-level scope (no enclosing instance)
+- `pin` — the pin or net name at this step
+- ` -- ` — boundary crossing between adjacent cells in the path
+
+## CLI Reference
+
+### `nettrace` — hierarchical signal tracing
+
+```
+nettrace -netlist <file|dir> -cell <cell> -pin <pin> [-target <cell>] [-max_depth <n>] [-defines <csv>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-netlist` | Path to netlist file or Verilog directory |
+| `-cell` | Starting cell or instance name |
+| `-pin` | Starting pin/net name |
+| `-target` | Optional target cell (traces to all endpoints if omitted) |
+| `-max_depth` | Limit path depth (useful for supply nets) |
+| `-defines` | Comma-separated preprocessor defines (Verilog/SV only) |
+
+### `netparse` — build and cache JSON
+
+```
+netparse -netlist <file|dir> -output <file.json>
+```
+
+Serializes a parsed netlist to JSON for fast subsequent loading.
+
+## Library API
+
+### `NetlistParser(filename, tvars=None, defines=None, define_values=None, top=None, workers=0)`
+
+Parse a netlist from file, directory, or JSON cache.
+
+**Attributes:**
+- `format` — detected format: `'spice'`, `'cdl'`, `'spectre'`, `'verilog'`
+- `subckts` — dict mapping cell names to `SubcktDef` objects
+- `instances_by_parent`, `instances_by_celltype`, `instances_by_name` — lookup indices
+
+### `BidirectionalTracer(parser)`
+
+Trace signals bidirectionally through the hierarchy.
+
+**Methods:**
+- `trace(start_name, start_pin, target_name=None, max_depth=None)` — return list of `TraceStep` paths
+- `resolve_name(name)` — resolve cell/instance name to `(cell_type, inst_chain)` tuples
+
+### `TraceStep`
+
+Represents one step in a signal path.
+
+**Attributes:**
+- `cell` — cell/module name
+- `pin_or_net` — pin or net identifier
+- `direction` — `'start'`, `'down'`, `'up'`, or `'alias'`
+- `instance_name` — instance name (if applicable)
+- `inst_stack` — tuple of `(inst_name, parent_cell)` pairs for hierarchy
+
+### `format_path(path)`
+
+Format a list of `TraceStep` objects into a human-readable string. Each step renders as `cell|instance|pin`, with steps joined by ` -- `:
+
+```
+topCell|<internal>|pin0 -- Cell1|X1|pin1 -- Cell11|X1/X11|pin11
+```
+
+`<internal>` denotes the top-level scope (no enclosing instance); nested instances appear as `parent/child` (e.g. `X1/X11`). See [Understanding the trace output](#understanding-the-trace-output) above for a visual walkthrough.
+
+### `merge_aliases_into_subckt(sub, pairs)`
+
+Merge `assign` alias pairs into a subcircuit definition using union-find, preserving port names as canonical roots.
+
+## File Format Support
+
+| Format | Notes |
+|--------|-------|
+| **Verilog/SystemVerilog** | Full elaboration with parameter specialization, generate-loop expansion, and alias resolution (`assign`). Multi-file support with header discovery. |
+| **SPICE/CDL** | SUBCKT / ENDS blocks. Instance lines parsed with net and parameter extraction. CDL distinguished by `*.PININFO` markers. |
+| **Spectre** | SUBCKT / ENDS (no dot prefix). Bracket-escaped special characters handled. |
+| **JSON** | Fast-path cache format (output of `parser.dump_json()` or `netparse` CLI). |
+
+## Development
+
+### Install dev dependencies
+
+```bash
+pip install -e '.[dev]'
+```
+
+### Run tests
+
+```bash
+pytest                    # all tests
+pytest -m "not slow"      # skip regression tests
+```
+
+### Lint and format
+
+```bash
+ruff check .              # static checks
+ruff format .             # auto-format
+```
+
+### Type checking
+
+```bash
+mypy src/
+```
+
+### Code style
+
+- Functions and methods: `snake_case`
+- Classes: `PascalCase`
+- Public API: full type hints
+- Internal helpers: type hints where helpful
+
+### Adding new tests
+
+- Synthetic fixtures: `tests/fixtures/synthetic/`
+- Format-specific tests: `test_parser_<format>.py`
+- Regression tests: `test_*_regression.py` (marked `@pytest.mark.slow`)
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.
+
+**Copyright © 2026 Parvez Ahmmed**
