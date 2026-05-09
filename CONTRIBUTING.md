@@ -1,4 +1,4 @@
-# Contributing to nettrace
+# Contributing to netlist-tracer
 
 ## Development Setup
 
@@ -11,6 +11,16 @@ pip install -e '.[dev]'
 
 This installs the package in editable mode plus `pytest`, `ruff`, and `mypy`.
 
+#### Python 3.9 compatibility note
+
+If you're using Python 3.9 and `pip install -e .` fails with "setup.py not found", your `pip` is too old. Upgrade with:
+
+```bash
+python3.9 -m pip install --user --upgrade pip
+```
+
+PEP 660 editable installs require pip ≥ 21.3 (Oct 2021). The system `pip3.9` on some older installations (e.g., Pandora) ships with pip 20.2.3 from 2020.
+
 ## Testing
 
 ### Run all tests
@@ -19,7 +29,7 @@ This installs the package in editable mode plus `pytest`, `ruff`, and `mypy`.
 pytest
 ```
 
-Expected output: **30 passed** (all tests pass in ~0.4 seconds).
+Expected output: **28 passed** (all tests pass in ~0.4 seconds).
 
 ### Run fast tests only
 
@@ -34,6 +44,18 @@ Skips regression tests (`test_*_regression.py`) for quick iteration.
 ```bash
 pytest tests/test_parser_verilog.py -v
 ```
+
+### Local smoke test (optional)
+
+The local smoke tests are env-var-gated and skipped by default:
+
+```bash
+pytest                                                              # default — skips local tests
+pytest -m "not slow"                                                # all non-slow (including local if env var set)
+NETLIST_TRACER_LOCAL_CACHE=/path/to/cache.json pytest -m local      # only local smoke tests
+```
+
+To enable local smoke tests, set `NETLIST_TRACER_LOCAL_CACHE` to the path of a JSON cache file (created with `netlist-parser`). The tests then verify that the cache loads successfully and that basic invariants hold (format, subckts, instances, and deterministic trace). Without the env var, the tests are skipped with a clear message.
 
 ## Linting and Formatting
 
@@ -110,7 +132,7 @@ Example:
 
 ```python
 import pytest
-from nettrace import NetlistParser
+from netlist_tracer import NetlistParser
 
 def test_parse_spice_basic():
     parser = NetlistParser("tests/fixtures/synthetic/spice_basic.sp")
@@ -179,7 +201,7 @@ pre-commit run --all-files
 ### Module Layout
 
 ```
-src/nettrace/
+src/netlist_tracer/
 ├── __init__.py           # Public API re-exports
 ├── model.py              # SubcktDef, Instance, merge_aliases_into_subckt
 ├── parser.py             # NetlistParser orchestrator
@@ -187,8 +209,8 @@ src/nettrace/
 ├── exceptions.py         # Custom exception hierarchy
 ├── _logging.py           # Logging factory
 ├── cli/
-│   ├── trace.py          # nettrace CLI
-│   └── parse.py          # netparse CLI
+│   ├── trace.py          # netlist-tracer CLI
+│   └── parse.py          # netlist-parser CLI
 └── parsers/
     ├── detect.py         # Format auto-detection
     ├── spice.py          # SPICE/CDL parser
@@ -207,6 +229,47 @@ src/nettrace/
 - **Instance**: instantiation record with name, cell_type, nets, params
 - **TraceStep**: one hop in a path (cell, pin/net, direction, hierarchy stack)
 - **BidirectionalTracer**: DFS-based path finder resolving aliases at each step
+
+## Releasing
+
+### Preparing a Release
+
+1. **Bump version** in `src/netlist_tracer/__init__.py` and `pyproject.toml` (e.g., from `0.1.0` to `0.2.0`)
+2. **Update CHANGELOG.md** — move [Unreleased] entries to a new version section
+3. **Commit changes**: `git commit -m "Release v0.2.0"`
+4. **Tag the release**: `git tag v0.2.0`
+5. **Push**: `git push origin main && git push origin v0.2.0`
+
+The tag push triggers `.github/workflows/release.yml` to build and publish to PyPI automatically.
+
+### PyPI Publish Setup
+
+Two paths are supported:
+
+#### Trusted Publishing (Preferred)
+
+Lower attack surface; no secrets needed.
+
+1. **Claim the project on PyPI**: https://pypi.org/manage/account/publishing/
+2. **Add a pending publisher** with:
+   - Owner: `parvez2083`
+   - Repository: `netlist-tracer`
+   - Workflow: `release.yml`
+   - Environment: `pypi`
+3. **Create the `pypi` environment** in GitHub repo Settings → Environments
+4. **First tag push** will prompt PyPI to confirm the pending publisher claim
+
+#### Token-Based Publish (Fallback)
+
+For early-stage convenience; less secure than trusted publishing.
+
+1. **Generate an API token** on PyPI: https://pypi.org/manage/account/token/
+2. **Add as a GitHub Actions secret** in repo Settings → Secrets:
+   - Name: `PYPI_API_TOKEN`
+   - Value: `<paste token>`
+3. **Tag and push** as normal. The workflow detects the secret and uses it automatically.
+
+**Recommendation**: Start with token-based for quick iteration, then migrate to trusted publishing once the project is established.
 
 ## Questions?
 

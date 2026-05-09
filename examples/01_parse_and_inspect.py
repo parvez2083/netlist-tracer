@@ -6,7 +6,7 @@ This example demonstrates basic netlist parsing, subcircuit discovery,
 and inspection of ports and instances.
 """
 
-from nettrace import NetlistParser
+from netlist_tracer import NetlistParser
 
 # Parse a SPICE netlist
 netlist_file = "tests/fixtures/synthetic/spice_basic.sp"

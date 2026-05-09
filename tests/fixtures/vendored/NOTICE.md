@@ -2,11 +2,11 @@
 
 The files in this directory are **verbatim third-party netlists** vendored
 into this repository for use as regression-test inputs. They are NOT part of
-the `nettrace` package and are NOT redistributed under the `nettrace` MIT
-license. Each file retains its upstream license; this NOTICE.md records the
-provenance and license obligations.
+the `netlist-tracer` package and are NOT redistributed under the
+`netlist-tracer` MIT license. Each file retains its upstream license; this
+NOTICE.md records the provenance and license obligations.
 
-The `nettrace` project (MIT-licensed) does not modify these files and does
+The `netlist-tracer` project (MIT-licensed) does not modify these files and does
 not assert any rights over them. Removing or modifying any vendored file's
 embedded copyright/license header is prohibited.
 
@@ -38,7 +38,7 @@ embedded copyright/license header is prohibited.
 - **MIT compatibility**: Apache-2.0 is one-way compatible with MIT —
   MIT-licensed projects may include Apache-2.0 files provided the upstream
   license header and NOTICE attribution are preserved (which we do here and
-  in the file itself). The `nettrace` package proper remains MIT-licensed;
+  in the file itself). The `netlist-tracer` package proper remains MIT-licensed;
   this single vendored test fixture is Apache-2.0.
 
 ---

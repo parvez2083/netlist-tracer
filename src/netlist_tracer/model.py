@@ -1,4 +1,4 @@
-"""Data models for nettrace: SubcktDef, Instance, and alias merging."""
+"""Data models for netlist_tracer: SubcktDef, Instance, and alias merging."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ class Instance:
     )  # param=value pairs from SPICE instance lines
 
 
-def merge_aliases_into_subckt(sub: SubcktDef, pairs) -> None:
+def merge_aliases_into_subckt(sub: SubcktDef, pairs: list[tuple[str, str]]) -> None:
     """Merge a list of (lhs, rhs) `assign` pairs into sub.aliases using
     union-find. Port names (members of sub.pins) are preferred as roots so
     that going DOWN from a parent into the cell still resolves to the
@@ -53,10 +53,18 @@ def merge_aliases_into_subckt(sub: SubcktDef, pairs) -> None:
         parent.setdefault(n, n)
         parent.setdefault(c, c)
 
+    # Pre-seed parent dict with all pair endpoints
+    for lhs, rhs in pairs:
+        if lhs != rhs:
+            if lhs not in parent:
+                parent[lhs] = lhs
+            if rhs not in parent:
+                parent[rhs] = rhs
+
     def find(x: str) -> str:
         # Iterative path-compression
         root = x
-        while parent.setdefault(root, root) != root:
+        while parent[root] != root:
             root = parent[root]
         while parent[x] != root:
             parent[x], x = root, parent[x]
@@ -87,10 +95,8 @@ def merge_aliases_into_subckt(sub: SubcktDef, pairs) -> None:
             continue
         union(lhs, rhs)
 
-    # Build canonical map: every net that has a non-self root gets recorded
-    new_aliases = {}
+    # Build canonical map: full path compression + dict comprehension
     for net in list(parent.keys()):
-        root = find(net)
-        if root != net:
-            new_aliases[net] = root
+        find(net)  # full path compression
+    new_aliases = {net: root for net, root in parent.items() if root != net}
     sub.aliases = new_aliases

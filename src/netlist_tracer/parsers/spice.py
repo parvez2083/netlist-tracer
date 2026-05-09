@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from nettrace.model import Instance, SubcktDef
+from netlist_tracer.model import Instance, SubcktDef
 
 
 def parse_spice(filename: str) -> tuple[dict[str, SubcktDef], list[Instance]]:
@@ -22,8 +22,8 @@ def parse_spice(filename: str) -> tuple[dict[str, SubcktDef], list[Instance]]:
     subckts: dict[str, SubcktDef] = {}
     instances: list[Instance] = []
 
-    current_subckt = None
-    subckt_content = []
+    current_subckt: Optional[str] = None
+    subckt_content: list[str] = []
     i = 0
 
     while i < len(lines):

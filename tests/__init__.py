@@ -1,1 +1,1 @@
-"""Tests for nettrace package."""
+"""Tests for netlist_tracer package."""

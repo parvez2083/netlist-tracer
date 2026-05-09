@@ -3,9 +3,9 @@ from __future__ import annotations
 import re
 from collections import deque
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional, cast
 
-from nettrace.parser import NetlistParser
+from netlist_tracer.parser import NetlistParser
 
 
 @dataclass
@@ -79,12 +79,12 @@ class BidirectionalTracer:
     ) -> list[tuple[str, tuple[tuple[str, str], ...]]]:
         """Resolve hierarchical instance path."""
         n = len(segments)
-        results = []
-        stack = [(0, None, ())]
+        results: list[tuple[str, tuple[tuple[str, str], ...]]] = []
+        stack: list[tuple[int, str | None, tuple[tuple[str, str], ...]]] = [(0, None, ())]
         while stack:
             i, parent, chain = stack.pop()
             if i >= n:
-                if chain:
+                if chain and parent is not None:
                     results.append((parent, chain))
                 continue
             for j in range(n, i, -1):
@@ -102,7 +102,7 @@ class BidirectionalTracer:
                     stack.append((j, inst.cell_type, new_chain))
         return results
 
-    def resolve_name(self, name: str) -> list[tuple[str, Optional[tuple[tuple[str, str], ...]]]]:
+    def resolve_name(self, name: str) -> list[tuple[str, tuple[tuple[str, str], ...] | None]]:
         """Resolve a name to (cell_type, inst_chain).
 
         Args:
@@ -114,7 +114,7 @@ class BidirectionalTracer:
         if name in self.parser.subckts:
             return [(name, None)]
 
-        matches: list[tuple[str, tuple[tuple[str, str], ...]]] = [
+        matches: list[tuple[str, tuple[tuple[str, str], ...] | None]] = [
             (inst.cell_type, ((inst.name, inst.parent_cell),))
             for inst in self.parser.instances_by_name.get(name, [])
         ]
@@ -137,12 +137,16 @@ class BidirectionalTracer:
         if not matches:
             segments = self._split_path(name)
             if len(segments) >= 2:
-                matches = self._resolve_hierarchical(segments)
+                # cast: _resolve_hierarchical returns non-None chains; None is only possible via other resolve_name branches
+                matches = cast(
+                    list[tuple[str, tuple[tuple[str, str], ...] | None]],
+                    self._resolve_hierarchical(segments),
+                )
 
         return matches
 
     def _enumerate_ancestor_chains(
-        self, cell_type: str, _seen: Optional[set] = None
+        self, cell_type: str, _seen: Optional[set[str]] = None
     ) -> list[tuple[tuple[str, str], ...]]:
         """Enumerate all ancestor chains for a cell type."""
         if _seen is None:
@@ -180,7 +184,7 @@ class BidirectionalTracer:
         """
         start_matches = self.resolve_name(start_name)
         if not start_matches:
-            print(f"Error: '{start_name}' not found as cell type or instance name")
+            print(f"ERROR: '{start_name}' not found as cell type or instance name")
             return []
 
         if max_depth is None and re.match(r"^(VDD|VSS)", start_pin):
@@ -190,7 +194,7 @@ class BidirectionalTracer:
         if target_name:
             target_matches = self.resolve_name(target_name)
             if not target_matches:
-                print(f"Error: '{target_name}' not found as cell type or instance name")
+                print(f"ERROR: '{target_name}' not found as cell type or instance name")
                 return []
             for cell_type, inst_chain in target_matches:
                 leaf_ctx = inst_chain[-1] if inst_chain else None
@@ -200,29 +204,43 @@ class BidirectionalTracer:
         for start_cell, start_inst_chain in start_matches:
             subckt = self.parser.subckts.get(start_cell)
             if not subckt or start_pin not in subckt.pin_to_pos:
-                print(f"Error: Pin '{start_pin}' not found in cell '{start_cell}'")
+                print(f"ERROR: Pin '{start_pin}' not found in cell '{start_cell}'")
                 if subckt:
                     import difflib
 
-                    def base(p):
+                    def base(p: str) -> str:
                         return re.sub(r"\[\d+\]$", "", p)
 
-                    q = start_pin.lower()
-                    seen, suggestions = set(), []
-                    for p in subckt.pins:
-                        b = base(p)
-                        if q in b.lower() and b not in seen:
-                            seen.add(b)
-                            suggestions.append(b)
-                    bases = list(dict.fromkeys(base(p) for p in subckt.pins))
-                    for s in difflib.get_close_matches(start_pin, bases, n=10, cutoff=0.6):
-                        if s not in seen:
-                            seen.add(s)
-                            suggestions.append(s)
-                    if suggestions:
-                        print(f"Did you mean: {suggestions[:10]}")
+                    # If input matches the base of one or more indexed pins
+                    # (bare bus name attempt — not supported per Strict
+                    # Bit-Level), suggest the actual indexed pins instead of
+                    # echoing the same base name back.
+                    bus_members = [
+                        p
+                        for p in subckt.pins
+                        if p != start_pin and re.search(r"\[\d+\]$", p) and base(p) == start_pin
+                    ]
+                    if bus_members:
+                        print(f"Did you mean: {bus_members[:10]}")
                     else:
-                        print(f"Available pins ({len(subckt.pins)} total): {subckt.pins[:10]}...")
+                        q = start_pin.lower()
+                        seen, suggestions = set(), []
+                        for p in subckt.pins:
+                            b = base(p)
+                            if q in b.lower() and b not in seen:
+                                seen.add(b)
+                                suggestions.append(b)
+                        bases = list(dict.fromkeys(base(p) for p in subckt.pins))
+                        for s in difflib.get_close_matches(start_pin, bases, n=10, cutoff=0.6):
+                            if s not in seen:
+                                seen.add(s)
+                                suggestions.append(s)
+                        if suggestions:
+                            print(f"Did you mean: {suggestions[:10]}")
+                        else:
+                            print(
+                                f"Available pins ({len(subckt.pins)} total): {subckt.pins[:10]}..."
+                            )
                 continue
             if start_inst_chain is None:
                 chains = self._enumerate_ancestor_chains(start_cell)
@@ -356,6 +374,80 @@ class BidirectionalTracer:
                     all_paths.append(path)
 
         return all_paths
+
+    def expand_pin(self, subckt: Any, name: str) -> list[str]:
+        """Expand a pin name to its bit-level members.
+
+        - If `name` exists exactly in subckt.pin_to_pos: returns [name].
+        - If `name` is a bare bus base (e.g. 'data' when only 'data[0]'..
+          'data[N]' exist as pins): returns all indexed members.
+        - Otherwise: returns [] (unknown pin).
+
+        Used by `trace_pins` to support both bit-level and bus-name forms.
+        """
+        if name in subckt.pin_to_pos:
+            return [name]
+        return [
+            p
+            for p in subckt.pins
+            if p != name and re.search(r"\[\d+\]$", p) and re.sub(r"\[\d+\]$", "", p) == name
+        ]
+
+    def trace_pins(
+        self,
+        start_name: str,
+        pins: Optional[list[str]] = None,
+        target_name: Optional[str] = None,
+        max_depth: Optional[int] = None,
+    ) -> dict[str, list[list[TraceStep]]]:
+        """Trace multiple pins at once.
+
+        Returns a dictionary mapping pin names to their trace paths.
+        If `pins` is None, traces all bit-level entries in the cell's pin_to_pos.
+        Bare bus base names (e.g. 'data' when only 'data[0]'..'data[N]' exist
+        as pins) are expanded to all indexed members. Unknown pin names are
+        passed through to `trace()` which reports an error.
+
+        Args:
+            start_name: Starting cell or instance name.
+            pins: List of pin names to trace. If None, traces all bit-level pins.
+            target_name: Optional target cell or instance name.
+            max_depth: Optional maximum path depth.
+
+        Returns:
+            Dictionary mapping pin_name -> list of trace paths (each path is a list of TraceStep objects).
+        """
+        # Resolve start_name to cell_type
+        start_matches = self.resolve_name(start_name)
+        if not start_matches:
+            print(f"ERROR: '{start_name}' not found as cell type or instance name")
+            return {}
+
+        start_cell = start_matches[0][0]
+        subckt = self.parser.subckts.get(start_cell)
+        if not subckt:
+            print(f"ERROR: Cell '{start_cell}' has no subcircuit definition")
+            return {}
+
+        # Determine pins to trace
+        if pins is None:
+            # Omit-mode: trace all bit-level pins in pin_to_pos
+            pins_to_trace = list(subckt.pin_to_pos.keys())
+        else:
+            # Expand any bare bus base names to their indexed members.
+            # Unknown names are passed through; trace() will report an error.
+            pins_to_trace = []
+            for p in pins:
+                expanded = self.expand_pin(subckt, p)
+                pins_to_trace.extend(expanded if expanded else [p])
+
+        # Trace each pin and collect results
+        results: dict[str, list[list[TraceStep]]] = {}
+        for pin in pins_to_trace:
+            paths = self.trace(start_name, pin, target_name, max_depth)
+            results[pin] = paths
+
+        return results
 
 
 def format_path(path: list[TraceStep]) -> str:

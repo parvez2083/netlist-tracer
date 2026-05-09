@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import bisect
 import re
 from typing import Optional
 
-from nettrace.parsers.verilog.preprocess import _sv_resolve_bound, _sv_resolve_width_expr
+from netlist_tracer._logging import get_logger
+from netlist_tracer.parsers.verilog.preprocess import _sv_resolve_bound, _sv_resolve_width_expr
+
+_logger = get_logger(__name__)
 
 # Pre-compiled patterns
 _RE_INST = re.compile(r"\b([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)?\(")
 _RE_PARAM_BLOCK = re.compile(r"#\s*\((?:[^()]*|\((?:[^()]*|\([^()]*\))*\))*\)")
 _RE_PIN = re.compile(r"\.(\w+)\s*\(")
+_RE_LOCALPARAM = re.compile(r"\b(?:localparam|parameter)\s+(?:\w+\s+)?(\w+)\s*=\s*([^;,)]+)")
+_RE_DOLLAR_SIZE = re.compile(r"\$size\s*\(\s*(\w+)\s*\)")
 
 _KEYWORDS = frozenset(
     {
@@ -527,11 +533,11 @@ def _sv_expand_assign_side(
     return _sv_expand_piece(s, define_values, None, wires_2d)
 
 
-def _sv_unroll_generate_for_blocks(
+def _sv_unroll_generate_for_blocks_once(
     body: str, define_values: Optional[dict[str, int]] = None
 ) -> str:
     """
-    Pre-processing helper: scan body for generate-for blocks and unroll them.
+    Single-pass unroll of generate-for blocks.
 
     For each generate-for block matched by _RE_GENFOR, substitute the block
     with N copies of its inner body where the loop variable has been replaced
@@ -544,14 +550,13 @@ def _sv_unroll_generate_for_blocks(
         define_values: Resolved parameter/macro values for bound resolution (optional, defaults to {})
 
     Outputs:
-        Transformed body string with generate-for blocks unrolled. If a generate-for block
-        has unresolvable bounds (start/stop/step is None), it is preserved verbatim.
+        Transformed body string with one level of generate-for blocks unrolled.
+        If a generate-for block has unresolvable bounds (start/stop/step is None),
+        it is preserved verbatim.
 
     Notes:
         Uses the same regex (_RE_GENFOR), helpers (_sv_find_begin_end, _sv_resolve_bound,
         _sv_parse_step), and loop-variable substitution pattern as _sv_extract_instances.
-        Single-pass unroll: outer loops produce inner-loop bodies repeated N times.
-        For nested generate-for + assign, apply iteration up to depth 4 if needed.
     """
     if define_values is None:
         define_values = {}
@@ -570,7 +575,7 @@ def _sv_unroll_generate_for_blocks(
         cmp_op = m.group(3)
         bound_expr = m.group(4)
         incr_expr = m.group(5)
-        label = m.group(6)
+        _label = m.group(6)  # noqa: F841
 
         start = _sv_resolve_bound(start_expr, define_values)
         stop = _sv_resolve_bound(bound_expr, define_values)
@@ -593,8 +598,9 @@ def _sv_unroll_generate_for_blocks(
         block_body = body[begin_end:end_kw]
 
         # Expand the loop: N copies with loop variable replaced
+        var_re = re.compile(r"\b" + re.escape(var) + r"\b")
         for i in range(start, stop, step):
-            expanded = re.sub(r"\b" + var + r"\b", str(i), block_body)
+            expanded = var_re.sub(str(i), block_body)
             result.append(expanded)
 
         last = block_end
@@ -602,6 +608,70 @@ def _sv_unroll_generate_for_blocks(
     # Append remaining text after last match
     result.append(body[last:])
     return "".join(result)
+
+
+def _sv_unroll_generate_for_blocks(
+    body: str, define_values: Optional[dict[str, int]] = None
+) -> str:
+    """
+    Pre-processing helper: scan body for generate-for blocks and unroll them to fixed-point.
+
+    Iterates unrolling until no more generate-for blocks remain (fixed-point), or until
+    max depth (8 iterations) is reached. Handles nested generate-for blocks by repeated
+    single-pass unrolls.
+
+    For each generate-for block matched by _RE_GENFOR, substitute the block
+    with N copies of its inner body where the loop variable has been replaced
+    by the corresponding integer literal. Mirrors the in-place expansion already
+    done inside _sv_extract_instances at lines 666-697, but emits the result
+    as a single string suitable for downstream consumers (alias extraction).
+
+    Inputs:
+        body: Raw module body text
+        define_values: Resolved parameter/macro values for bound resolution (optional, defaults to {})
+
+    Outputs:
+        Transformed body string with all nested generate-for blocks unrolled to concrete indices.
+        If a generate-for block has unresolvable bounds (start/stop/step is None),
+        it is preserved verbatim. If max depth (8) is reached, returns partial result
+        with warning logged.
+
+    Notes:
+        Uses the same regex (_RE_GENFOR), helpers (_sv_find_begin_end, _sv_resolve_bound,
+        _sv_parse_step), and loop-variable substitution pattern as _sv_extract_instances.
+        Fixed-point iteration: outer loops produce inner-loop bodies repeated N times;
+        inner loops are then expanded in subsequent iterations.
+    """
+    if define_values is None:
+        define_values = {}
+
+    max_depth = 8
+    prev_body = None
+    current_body = body
+    iteration = 0
+
+    while iteration < max_depth:
+        # Check if there are any remaining generate-for blocks
+        if not _RE_GENFOR.search(current_body):
+            # No more blocks: reached fixed-point
+            break
+
+        # Single-pass unroll
+        prev_body = current_body
+        current_body = _sv_unroll_generate_for_blocks_once(current_body, define_values)
+        iteration += 1
+
+        # Reached fixed-point (no change)
+        if current_body == prev_body:
+            break
+
+    if iteration >= max_depth and _RE_GENFOR.search(current_body):
+        _logger.warning(
+            f"WARNING: generate-for unrolling reached max depth ({max_depth}) with unresolved blocks remaining. "
+            "Returning partial result. Check for infinite or pathological loop structures."
+        )
+
+    return current_body
 
 
 def _sv_extract_alias_pairs(
@@ -693,10 +763,11 @@ def _sv_extract_instances_flat(body: str, prefix: str = "") -> list:
         overrides = {}
         cell_end = m.start(1) + len(cell)
         inst_start = m.start(2)
-        for end_idx, ov in overrides_at.items():
-            if cell_end <= end_idx <= inst_start:
-                overrides = ov
-                break
+        override_keys = sorted(overrides_at.keys())
+        i = bisect.bisect_left(override_keys, cell_end)
+        j = bisect.bisect_right(override_keys, inst_start)
+        if i < j:
+            overrides = overrides_at[override_keys[i]]
         if cell in _PRIMITIVES:
             nets = [n.strip() for n in inner.split(",") if n.strip()]
             pmap = {f"_p{i}": n for i, n in enumerate(nets)}
@@ -729,7 +800,6 @@ def _sv_extract_instances(
     last = 0
 
     # Parse local parameters
-    _RE_LOCALPARAM = re.compile(r"\b(?:localparam|parameter)\s+(?:\w+\s+)?(\w+)\s*=\s*([^;,)]+)")
     for lm in _RE_LOCALPARAM.finditer(body):
         name = lm.group(1)
         val = _sv_resolve_bound(lm.group(2), define_values)
@@ -747,7 +817,6 @@ def _sv_extract_instances(
             sig = m.group(1)
             return str(sizes[sig]) if sig in sizes else m.group(0)
 
-        _RE_DOLLAR_SIZE = re.compile(r"\$size\s*\(\s*(\w+)\s*\)")
         body = _RE_DOLLAR_SIZE.sub(_repl_size, body)
 
     # Find and expand generate-for loops
@@ -773,8 +842,9 @@ def _sv_extract_instances(
         block_end = _sv_find_begin_end(body, begin_end)
         end_kw = body.rfind("end", begin_end, block_end)
         block_body = body[begin_end:end_kw]
+        var_re = re.compile(r"\b" + re.escape(var) + r"\b")
         for i in range(start, stop, step):
-            expanded = re.sub(r"\b" + var + r"\b", str(i), block_body)
+            expanded = var_re.sub(str(i), block_body)
             iter_prefix = f"{prefix}{label}[{i}]."
             instances.extend(_sv_extract_instances(expanded, define_values, iter_prefix))
         last = block_end

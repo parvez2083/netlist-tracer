@@ -1,4 +1,4 @@
-"""Logging configuration for the nettrace package."""
+"""Logging configuration for the netlist_tracer package."""
 
 import logging
 
@@ -19,7 +19,7 @@ def get_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(name)
 
     # Attach NullHandler at the package root to prevent 'no handlers' warnings.
-    root_logger = logging.getLogger("nettrace")
+    root_logger = logging.getLogger("netlist_tracer")
     if not root_logger.handlers:
         root_logger.addHandler(logging.NullHandler())
 

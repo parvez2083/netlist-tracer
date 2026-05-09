@@ -1,0 +1,19 @@
+Format: verilog
+Found 8 module/subcircuit definitions
+
+Start: picorv32
+  -> cell type picorv32
+Target: (all endpoints)
+
+Tracing: picorv32.clk -> all endpoints
+--------------------------------------------------
+
+Found 5 path(s):
+Format: <CELL>|<HierarchicalInstanceName>|<PIN>   where HierarchicalInstanceName = <inst1>/<inst2>/.../<CELL_INST>
+        <CELL>|<internal>|<NET>   for the topmost CELL's pin (same as NET) connecting to a subblock pin, OR a local maxima in the path where 2 subblock pins are connected by a NET inside the CELL
+
+Path 1: picorv32|<internal>|clk -- picorv32_pcpi_fast_mul|pcpi_mul|clk
+Path 2: picorv32|<internal>|clk -- picorv32_pcpi_mul|pcpi_mul|clk
+Path 3: picorv32|<internal>|clk -- picorv32_pcpi_div|pcpi_div|clk
+Path 4: picorv32|picorv32_core|clk -- picorv32_axi|<internal>|clk -- picorv32_axi_adapter|axi_adapter|clk
+Path 5: picorv32|picorv32_core|clk -- picorv32_wb|<internal>|clk -- picorv32_wb|<internal>|wb_clk_i

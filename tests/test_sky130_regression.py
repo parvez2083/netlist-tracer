@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from nettrace import BidirectionalTracer, NetlistParser, format_path
+from netlist_tracer import BidirectionalTracer, NetlistParser, format_path
 
 
 def _parser_snapshot(parser):

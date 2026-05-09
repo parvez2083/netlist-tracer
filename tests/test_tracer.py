@@ -1,6 +1,6 @@
 """Unit tests for the bidirectional tracer (PHASE 10)."""
 
-from nettrace import BidirectionalTracer, NetlistParser, format_path
+from netlist_tracer import BidirectionalTracer, NetlistParser, format_path
 
 
 def test_tracer_basic_instantiation(synthetic_concat_alias_v):
@@ -56,3 +56,68 @@ def test_tracer_max_depth(synthetic_concat_alias_v):
     # max_depth=0 should return only the starting point
     for path in paths_depth0:
         assert len(path) <= 1, "Path depth=0 should have at most one step (start)"
+
+
+def test_trace_pins_single_bit(synthetic_concat_alias_v):
+    """Test trace_pins with explicit single bit."""
+    parser = NetlistParser(synthetic_concat_alias_v)
+    tracer = BidirectionalTracer(parser)
+    # concat_alias has pins 'a', 'b', 'y'
+    result = tracer.trace_pins("concat_alias", pins=["y"])
+    assert isinstance(result, dict), "trace_pins should return a dict"
+    assert "y" in result, "Result dict should have 'y' key"
+    assert isinstance(result["y"], list), "Pin value should be a list of paths"
+
+
+def test_trace_pins_omit_all(synthetic_concat_alias_v):
+    """Test trace_pins with pins=None traces all bit-level pins."""
+    parser = NetlistParser(synthetic_concat_alias_v)
+    tracer = BidirectionalTracer(parser)
+    result = tracer.trace_pins("concat_alias", pins=None)
+    assert isinstance(result, dict), "trace_pins should return a dict"
+    # Result keys should match all pin_to_pos keys for concat_alias
+    subckt = parser.subckts.get("concat_alias")
+    assert subckt is not None, "concat_alias should exist"
+    expected_pins = set(subckt.pin_to_pos.keys())
+    actual_pins = set(result.keys())
+    assert actual_pins == expected_pins, (
+        f"Omit-mode should trace all pins. Expected {expected_pins}, got {actual_pins}"
+    )
+
+
+def test_trace_pins_bare_busname_expands(vendored_picorv32_v):
+    """Bare bus base name expands to all bit-level members as separate entries.
+
+    Equivalent to passing `-pin mem_addr[0],mem_addr[1],...,mem_addr[31]`.
+    Each bit gets its own key in the result dict (NOT grouped).
+    """
+    parser = NetlistParser(vendored_picorv32_v)
+    tracer = BidirectionalTracer(parser)
+    result = tracer.trace_pins("picorv32", pins=["mem_addr"])
+    expected_keys = {f"mem_addr[{i}]" for i in range(32)}
+    assert set(result.keys()) == expected_keys, (
+        f"Bare bus name must expand to 32 indexed members; got {sorted(result.keys())}"
+    )
+    for key, paths in result.items():
+        assert isinstance(paths, list), f"{key} must map to a list"
+
+
+def test_trace_pins_mixed(synthetic_concat_alias_v):
+    """Test trace_pins with a mix of valid and invalid pins."""
+    parser = NetlistParser(synthetic_concat_alias_v)
+    tracer = BidirectionalTracer(parser)
+    result = tracer.trace_pins("concat_alias", pins=["y", "nonexistent"])
+    assert "y" in result, "Valid pin 'y' should be in result"
+    assert "nonexistent" in result, "Invalid pin should still be in result dict"
+    assert isinstance(result["y"], list), "Valid pin should map to list of paths"
+    assert result["nonexistent"] == [], "Invalid pin should map to empty list"
+
+
+def test_trace_pins_unknown_pin(synthetic_concat_alias_v):
+    """Test trace_pins with completely unknown pin name."""
+    parser = NetlistParser(synthetic_concat_alias_v)
+    tracer = BidirectionalTracer(parser)
+    result = tracer.trace_pins("concat_alias", pins=["total_garbage_pin_name"])
+    assert isinstance(result, dict), "Should return dict even with unknown pin"
+    assert "total_garbage_pin_name" in result, "Unknown pin key should be in result"
+    assert result["total_garbage_pin_name"] == [], "Unknown pin should map to empty list"

@@ -1,4 +1,9 @@
-# nettrace
+# netlist-tracer
+
+[![CI](https://github.com/parvez2083/netlist-tracer/actions/workflows/ci.yml/badge.svg)](https://github.com/parvez2083/netlist-tracer/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
+[![Last commit](https://img.shields.io/github/last-commit/parvez2083/netlist-tracer)](https://github.com/parvez2083/netlist-tracer/commits/main)
 
 **Multi-format netlist parser and bidirectional hierarchical signal tracer**
 
@@ -27,7 +32,7 @@ Note: PyPI publish is not yet available. Clone the repository and install from s
 ### Parse a netlist
 
 ```python
-from nettrace import NetlistParser
+from netlist_tracer import NetlistParser
 
 # Automatic format detection
 parser = NetlistParser("design.v")  # or .sp, .cdl, .scs
@@ -40,7 +45,7 @@ print(f"Instances: {sum(len(v) for v in parser.instances_by_parent.values())}")
 ### Trace a signal
 
 ```python
-from nettrace import NetlistParser, BidirectionalTracer, format_path
+from netlist_tracer import NetlistParser, BidirectionalTracer, format_path
 
 parser = NetlistParser("inverter.spice")
 tracer = BidirectionalTracer(parser)
@@ -71,25 +76,26 @@ Notation:
 
 ## CLI Reference
 
-### `nettrace` — hierarchical signal tracing
+### `netlist-tracer` — hierarchical signal tracing
 
 ```
-nettrace -netlist <file|dir> -cell <cell> -pin <pin> [-target <cell>] [-max_depth <n>] [-defines <csv>]
+netlist-tracer -netlist <file|dir> -cell <cell> [-pin <pin>] [-target <cell>] [-max_depth <n>] [--trace-format <fmt>] [-defines <csv>]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `-netlist` | Path to netlist file or Verilog directory |
 | `-cell` | Starting cell or instance name |
-| `-pin` | Starting pin/net name |
+| `-pin` | Pin name(s), BIT-LEVEL form (e.g. `data[3]`). Comma-separated or repeated flag. Omit to trace all bit-level pins of cell. |
 | `-target` | Optional target cell (traces to all endpoints if omitted) |
 | `-max_depth` | Limit path depth (useful for supply nets) |
+| `--trace-format` | Output format: `text` (default) or `json` |
 | `-defines` | Comma-separated preprocessor defines (Verilog/SV only) |
 
-### `netparse` — build and cache JSON
+### `netlist-parser` — build and cache JSON
 
 ```
-netparse -netlist <file|dir> -output <file.json>
+netlist-parser -netlist <file|dir> -output <file.json>
 ```
 
 Serializes a parsed netlist to JSON for fast subsequent loading.
@@ -111,6 +117,7 @@ Trace signals bidirectionally through the hierarchy.
 
 **Methods:**
 - `trace(start_name, start_pin, target_name=None, max_depth=None)` — return list of `TraceStep` paths
+- `trace_pins(start_name, pins=None, target_name=None, max_depth=None)` — trace multiple pins at once; returns dict mapping `pin_name -> [paths]`. If `pins=None`, traces all bit-level pins in the cell (Strict Bit-Level semantics).
 - `resolve_name(name)` — resolve cell/instance name to `(cell_type, inst_chain)` tuples
 
 ### `TraceStep`
@@ -138,6 +145,20 @@ topCell|<internal>|pin0 -- Cell1|X1|pin1 -- Cell11|X1/X11|pin11
 
 Merge `assign` alias pairs into a subcircuit definition using union-find, preserving port names as canonical roots.
 
+## Pin tracing forms
+
+`-pin` accepts three equivalent forms; each produces per-bit trace sections in the output:
+
+| Form | Example | Effect |
+|------|---------|--------|
+| Single pin | `-pin clk` | Trace one pin |
+| Comma-separated | `-pin clk,resetn,mem_addr[0]` | Trace each listed pin |
+| Repeated flag | `-pin clk -pin resetn` | Same as comma-separated |
+| Bare bus name | `-pin mem_addr` | Expand to all `mem_addr[0]..mem_addr[N]` bits as separate sections |
+| Omitted | (no `-pin`) | Trace every bit-level pin in the cell |
+
+Unknown pin names (typos, names that don't exist as a pin or as a bus base) error with `ERROR: Pin '...' not found in cell '...'` and exit non-zero. The error includes a `Did you mean: [...]` suggestion list.
+
 ## File Format Support
 
 | Format | Notes |
@@ -145,7 +166,7 @@ Merge `assign` alias pairs into a subcircuit definition using union-find, preser
 | **Verilog/SystemVerilog** | Full elaboration with parameter specialization, generate-loop expansion, and alias resolution (`assign`). Multi-file support with header discovery. |
 | **SPICE/CDL** | SUBCKT / ENDS blocks. Instance lines parsed with net and parameter extraction. CDL distinguished by `*.PININFO` markers. |
 | **Spectre** | SUBCKT / ENDS (no dot prefix). Bracket-escaped special characters handled. |
-| **JSON** | Fast-path cache format (output of `parser.dump_json()` or `netparse` CLI). |
+| **JSON** | Fast-path cache format (output of `parser.dump_json()` or `netlist-parser` CLI). |
 
 ## Development
 

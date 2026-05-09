@@ -5,8 +5,8 @@ import logging
 import os
 import sys
 
-from nettrace.exceptions import NetlistParseError
-from nettrace.parser import NetlistParser
+from netlist_tracer.exceptions import NetlistParseError
+from netlist_tracer.parser import NetlistParser
 
 
 def main() -> int:
@@ -27,16 +27,16 @@ def main() -> int:
     user_defines = set(args.defines.split(",")) if args.defines else None
 
     if not os.path.isfile(args.netlist) and not os.path.isdir(args.netlist):
-        print(f"Error: Netlist file or directory not found: {args.netlist}")
+        print(f"ERROR: Netlist file or directory not found: {args.netlist}")
         return 1
 
     try:
         nl_parser = NetlistParser(args.netlist, defines=user_defines, top=args.top)
     except NetlistParseError as e:
-        print(f"Error: {e}")
+        print(f"ERROR: {e}")
         return 1
     except Exception as e:
-        print(f"Error: Failed to parse netlist: {e}")
+        print(f"ERROR: Failed to parse netlist: {e}")
         return 1
 
     print(f"Format: {nl_parser.format}")
@@ -48,7 +48,7 @@ def main() -> int:
         nl_parser.dump_json(args.output)
         return 0
     except Exception as e:
-        print(f"Error: Failed to write output: {e}")
+        print(f"ERROR: Failed to write output: {e}")
         return 1
 
 

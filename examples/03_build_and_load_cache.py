@@ -9,7 +9,7 @@ netlist for quick subsequent loading without re-parsing the source format.
 import os
 import tempfile
 
-from nettrace import NetlistParser
+from netlist_tracer import NetlistParser
 
 # Parse and serialize
 source_file = "tests/fixtures/vendored/sky130_fd_sc_hd__inv_1.spice"
@@ -35,9 +35,9 @@ try:
     print(f"Instances: {sum(len(v) for v in parser2.instances_by_parent.values())}\n")
 
     # Verify they match
-    if (len(parser1.subckts) == len(parser2.subckts) and
-        sum(len(v) for v in parser1.instances_by_parent.values()) ==
-        sum(len(v) for v in parser2.instances_by_parent.values())):
+    if len(parser1.subckts) == len(parser2.subckts) and sum(
+        len(v) for v in parser1.instances_by_parent.values()
+    ) == sum(len(v) for v in parser2.instances_by_parent.values()):
         print("✓ Cache verification PASSED: structure matches")
     else:
         print("✗ Cache verification FAILED: structure mismatch")

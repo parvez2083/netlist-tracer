@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import re
 
-from nettrace.parsers.verilog.preprocess import (
+from netlist_tracer.parsers.verilog.preprocess import (
     _sv_preprocess,
     _sv_strip_comments,
     _sv_substitute_vars,
 )
-from nettrace.parsers.verilog.structure import (
+from netlist_tracer.parsers.verilog.structure import (
     _sv_extract_alias_pairs,
     _sv_extract_instances,
     _sv_extract_wire_widths_1d,

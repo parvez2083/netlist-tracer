@@ -7,17 +7,19 @@ from collections import defaultdict
 from multiprocessing import cpu_count
 from typing import Optional
 
-from nettrace._logging import get_logger
-from nettrace.exceptions import NetlistParseError
-from nettrace.model import Instance, SubcktDef, merge_aliases_into_subckt
-from nettrace.parsers.detect import detect_format
-from nettrace.parsers.spectre import parse_spectre
-from nettrace.parsers.spice import parse_spice
-from nettrace.parsers.verilog.instances import _sv_parse_file
-from nettrace.parsers.verilog.preprocess import _sv_discover_headers, _sv_parse_defines
-from nettrace.parsers.verilog.specialize import _sv_assemble, _sv_specialize_modules
+from netlist_tracer._logging import get_logger
+from netlist_tracer.exceptions import NetlistParseError
+from netlist_tracer.model import Instance, SubcktDef, merge_aliases_into_subckt
+from netlist_tracer.parsers.detect import detect_format
+from netlist_tracer.parsers.spectre import parse_spectre
+from netlist_tracer.parsers.spice import parse_spice
+from netlist_tracer.parsers.verilog.instances import _sv_parse_file
+from netlist_tracer.parsers.verilog.preprocess import _sv_discover_headers, _sv_parse_defines
+from netlist_tracer.parsers.verilog.specialize import _sv_assemble, _sv_specialize_modules
 
 _logger = get_logger(__name__)
+
+_CACHE_SCHEMA_VERSION = 1
 
 
 class NetlistParser:
@@ -27,7 +29,7 @@ class NetlistParser:
         self,
         filename: str,
         tvars: Optional[dict[str, str]] = None,
-        defines: Optional[set] = None,
+        defines: Optional[set[str]] = None,
         define_values: Optional[dict[str, int]] = None,
         top: Optional[str] = None,
         workers: int = 0,
@@ -104,9 +106,24 @@ class NetlistParser:
         self.instances_by_name[instance.name].append(instance)
 
     def _load_json(self, filepath: str) -> None:
-        """Load pre-parsed netlist data from JSON cache."""
+        """Load pre-parsed netlist data from JSON cache.
+
+        Supports both v0 (legacy, no schema_version field) and v1 (with schema_version=1).
+        Raises NetlistParseError if schema_version is present but newer than supported.
+        """
         with open(filepath) as f:
             data = json.load(f)
+
+        # Check schema version for forward compatibility
+        schema_version = data.get("schema_version", 0)  # v0 if missing
+        if schema_version > _CACHE_SCHEMA_VERSION:
+            raise NetlistParseError(
+                f"Cache schema version {schema_version} is newer than supported "
+                f"version {_CACHE_SCHEMA_VERSION}; update netlist-tracer."
+            )
+        if schema_version == 0:
+            _logger.info(f"Loading legacy v0 cache (no schema_version field): {filepath}")
+
         self.format = data.get("format", "verilog")
         self.source_path = data.get("source", filepath)
         _logger.info(f"Loading pre-parsed cache: {filepath}")
@@ -124,9 +141,9 @@ class NetlistParser:
                 self.subckts[name] = SubcktDef(name=name, pins=entry)
 
         for cell, pairs in (data.get("aliases") or {}).items():
-            sub = self.subckts.get(cell)
-            if sub is not None and pairs:
-                merge_aliases_into_subckt(sub, pairs)
+            subckt: SubcktDef | None = self.subckts.get(cell)
+            if subckt is not None and pairs:
+                merge_aliases_into_subckt(subckt, pairs)
 
         for inst_data in data["instances"]:
             self._add_instance(
@@ -230,12 +247,16 @@ class NetlistParser:
         if verbose:
             for parent, name, ctype, nc, np_ in mismatches:
                 _logger.warning(
-                    f"{parent}/{name} (cell={ctype}): {nc} connections but cell has {np_} pins"
+                    f"WARNING: {parent}/{name} (cell={ctype}): {nc} connections but cell has {np_} pins"
                 )
         return mismatches
 
     def dump_json(self, out_path: str) -> None:
         """Write parsed model to JSON cache file.
+
+        Includes schema_version field for forward compatibility. Future upgrades
+        can check this field to detect v0 caches (legacy, without field) and apply
+        migrations. Currently v1 = no migration needed from v0.
 
         Args:
             out_path: Output file path.
@@ -260,6 +281,7 @@ class NetlistParser:
             if pairs:
                 aliases_out[name] = pairs
         output = {
+            "schema_version": _CACHE_SCHEMA_VERSION,
             "format": self.format,
             "source": self.source_path,
             "subckts": subckts_out,

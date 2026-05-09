@@ -1,8 +1,8 @@
-"""Exception hierarchy for the nettrace package."""
+"""Exception hierarchy for the netlist_tracer package."""
 
 
 class NetlistError(Exception):
-    """Base exception for all nettrace errors."""
+    """Base exception for all netlist_tracer errors."""
 
     pass
 

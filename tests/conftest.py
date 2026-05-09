@@ -1,4 +1,4 @@
-"""Pytest configuration and fixtures for nettrace tests."""
+"""Pytest configuration and fixtures for netlist_tracer tests."""
 
 import os
 
@@ -51,3 +51,21 @@ def synthetic_cdl_basic_cdl(fixtures_synthetic_dir):
 def synthetic_spectre_basic_scs(fixtures_synthetic_dir):
     """Path to synthetic spectre_basic.scs fixture."""
     return os.path.join(fixtures_synthetic_dir, "spectre_basic.scs")
+
+
+@pytest.fixture
+def synthetic_nested_generate_v(fixtures_synthetic_dir):
+    """Path to synthetic nested_generate.v fixture (2-level nested generate-for)."""
+    return os.path.join(fixtures_synthetic_dir, "nested_generate.v")
+
+
+@pytest.fixture
+def fixtures_vendored_dir():
+    """Return path to vendored fixtures directory."""
+    return os.path.join(os.path.dirname(__file__), "fixtures", "vendored")
+
+
+@pytest.fixture
+def vendored_picorv32_v(fixtures_vendored_dir):
+    """Path to vendored picorv32.v fixture."""
+    return os.path.join(fixtures_vendored_dir, "picorv32.v")

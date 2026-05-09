@@ -1,6 +1,6 @@
 """Unit tests for SPICE parser (PHASE 10)."""
 
-from nettrace import NetlistParser
+from netlist_tracer import NetlistParser
 
 
 def test_spice_basic_parse(synthetic_spice_basic_sp):

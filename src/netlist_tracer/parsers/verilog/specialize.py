@@ -4,8 +4,8 @@ import re
 from collections import defaultdict
 from typing import Optional
 
-from nettrace.model import SubcktDef
-from nettrace.parsers.verilog.structure import _sv_extract_instances, _sv_extract_wires_2d
+from netlist_tracer.model import SubcktDef
+from netlist_tracer.parsers.verilog.structure import _sv_extract_instances, _sv_extract_wires_2d
 
 _RE_BRACKET_EXPR = re.compile(r"\[([^\[\]]+)\]")
 _RE_SAFE_ARITH = re.compile(r"^[\d\s+\-*/()]+$")
@@ -77,11 +77,11 @@ def _sv_specialize_modules(all_modules: list, define_values: dict, max_combos: i
     spec_lookup = {}
     for ctype, combo_set in combos.items():
         if len(combo_set) > max_combos:
-            from nettrace._logging import get_logger
+            from netlist_tracer._logging import get_logger
 
             logger = get_logger(__name__)
             logger.warning(
-                f"{ctype} has {len(combo_set)} parameter combos "
+                f"WARNING: {ctype} has {len(combo_set)} parameter combos "
                 f"(>{max_combos}); skipping specialization"
             )
             continue
@@ -94,9 +94,12 @@ def _sv_specialize_modules(all_modules: list, define_values: dict, max_combos: i
             if mangled in by_name:
                 continue
             sub_body = base_body
+            param_res = {
+                pname: re.compile(r"\b" + re.escape(pname) + r"\b") for pname in ovr.keys()
+            }
             for pname, pval in ovr.items():
                 sval = str(pval).strip()
-                sub_body = re.sub(r"\b" + re.escape(pname) + r"\b", sval, sub_body)
+                sub_body = param_res[pname].sub(sval, sub_body)
             sub_body = _sv_eval_bracket_arith(sub_body)
             new_insts = []
             for iname, ictype, pmap, sub_ovr in _sv_extract_instances(sub_body, define_values):
@@ -154,13 +157,13 @@ def _sv_flatten_ports(ports: list) -> list:
 
 def _sv_assemble(
     all_modules: list, top: Optional[str] = None, define_values: Optional[dict] = None
-) -> tuple[dict[str, list[str]], list]:
+) -> tuple[dict[str, SubcktDef], list]:
     """Build flat subckt + per-instance lists from parsed modules.
 
     Returns tuple of (subckts_dict, instances_list) where instances_list
     contains dicts (to be converted to Instance objects by caller).
     """
-    from nettrace.parsers.verilog.structure import _sv_expand_pin_net
+    from netlist_tracer.parsers.verilog.structure import _sv_expand_pin_net
 
     lookup = {m["name"]: m for m in all_modules}
     define_values = define_values or {}
@@ -230,7 +233,7 @@ def _sv_assemble(
         for mod in all_modules:
             if mod["name"] == name:
                 alias_pairs = mod.get("aliases") or []
-                from nettrace.model import merge_aliases_into_subckt
+                from netlist_tracer.model import merge_aliases_into_subckt
 
                 merge_aliases_into_subckt(sub, alias_pairs)
                 break

@@ -1,6 +1,6 @@
 """Unit tests for format detection (PHASE 10)."""
 
-from nettrace.parsers.detect import detect_format
+from netlist_tracer.parsers.detect import detect_format
 
 
 def test_detect_format_verilog(synthetic_concat_alias_v):

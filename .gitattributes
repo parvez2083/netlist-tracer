@@ -1,0 +1,11 @@
+* text=auto eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.spice text eol=lf
+*.v text eol=lf
+*.png binary
+tests/fixtures/golden/*.json -diff

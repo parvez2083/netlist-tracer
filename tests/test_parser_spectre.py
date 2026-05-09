@@ -1,6 +1,6 @@
 """Unit tests for Spectre parser (PHASE 10)."""
 
-from nettrace import NetlistParser
+from netlist_tracer import NetlistParser
 
 
 def test_spectre_basic_parse(synthetic_spectre_basic_scs):

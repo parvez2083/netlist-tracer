@@ -4,7 +4,7 @@ import os
 import re
 from typing import Optional
 
-from nettrace.model import Instance, SubcktDef
+from netlist_tracer.model import Instance, SubcktDef
 
 
 def parse_spectre(filename: str) -> tuple[dict[str, SubcktDef], list[Instance]]:

@@ -6,7 +6,7 @@ This example demonstrates bidirectional hierarchical signal tracing,
 showing how a signal connects through instances and resolving aliases.
 """
 
-from nettrace import BidirectionalTracer, NetlistParser, format_path
+from netlist_tracer import BidirectionalTracer, NetlistParser, format_path
 
 # Parse the sky130 inverter SPICE netlist
 netlist_file = "tests/fixtures/vendored/sky130_fd_sc_hd__inv_1.spice"
@@ -39,6 +39,8 @@ for i, path in enumerate(paths, 1):
     if i == 1:
         print("\n  Path details (first path only):")
         for j, step in enumerate(path):
-            print(f"    Step {j}: cell={step.cell}, pin/net={step.pin_or_net}, "
-                  f"direction={step.direction}")
+            print(
+                f"    Step {j}: cell={step.cell}, pin/net={step.pin_or_net}, "
+                f"direction={step.direction}"
+            )
         print()

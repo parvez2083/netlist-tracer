@@ -1,9 +1,9 @@
 """Multi-format netlist parser and bidirectional signal tracer."""
 
-from nettrace.exceptions import NetlistError, NetlistParseError, TraceError
-from nettrace.model import Instance, SubcktDef, merge_aliases_into_subckt
-from nettrace.parser import NetlistParser
-from nettrace.tracer import BidirectionalTracer, TraceStep, format_path
+from netlist_tracer.exceptions import NetlistError, NetlistParseError, TraceError
+from netlist_tracer.model import Instance, SubcktDef, merge_aliases_into_subckt
+from netlist_tracer.parser import NetlistParser
+from netlist_tracer.tracer import BidirectionalTracer, TraceStep, format_path
 
 __version__ = "0.1.0"
 

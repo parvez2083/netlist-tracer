@@ -4,10 +4,10 @@ import os
 from multiprocessing import Pool, cpu_count
 from typing import Optional
 
-from nettrace.model import Instance, SubcktDef, merge_aliases_into_subckt
-from nettrace.parsers.verilog.instances import _sv_parse_file
-from nettrace.parsers.verilog.preprocess import _sv_discover_headers, _sv_parse_defines
-from nettrace.parsers.verilog.specialize import _sv_assemble, _sv_specialize_modules
+from netlist_tracer.model import Instance, SubcktDef, merge_aliases_into_subckt
+from netlist_tracer.parsers.verilog.instances import _sv_parse_file
+from netlist_tracer.parsers.verilog.preprocess import _sv_discover_headers, _sv_parse_defines
+from netlist_tracer.parsers.verilog.specialize import _sv_assemble, _sv_specialize_modules
 
 
 def parse_verilog_directory(
@@ -80,20 +80,16 @@ def parse_verilog_directory(
     # Assemble to flat model
     subckts_flat, instances_flat = _sv_assemble(all_modules, top, define_values)
 
-    # Convert to SubcktDef objects and merge aliases
+    # Convert to SubcktDef objects with alias merging
     subckts: dict[str, SubcktDef] = {}
-    aliases_by_cell: dict[str, dict] = {}
     for name, ports_flat in subckts_flat.items():
         subckts[name] = SubcktDef(name=name, pins=ports_flat)
-        aliases_by_cell[name] = {}
-
-    # Merge aliases from the module definitions
     for mod in all_modules:
         mod_name = mod["name"]
         if mod_name in subckts:
             alias_pairs = mod.get("aliases") or []
             merge_aliases_into_subckt(subckts[mod_name], alias_pairs)
-            aliases_by_cell[mod_name] = subckts[mod_name].aliases
+    aliases_by_cell: dict[str, dict] = {name: sub.aliases for name, sub in subckts.items()}
 
     # Convert instances to Instance objects
     instances: list[Instance] = []

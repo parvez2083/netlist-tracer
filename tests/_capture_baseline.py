@@ -25,7 +25,7 @@ Exits 0 on success, non-zero on parse/trace failure (which is itself a
 finding worth reporting back to the user).
 
 This script intentionally has zero dependencies on the to-be-built
-`nettrace` package -- it imports the legacy top-level modules only.
+`netlist_tracer` package -- it imports the legacy top-level modules only.
 """
 
 from __future__ import annotations
@@ -40,8 +40,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from netlist_parser import NetlistParser  # noqa: E402
-from netlist_tracer import BidirectionalTracer, format_path  # noqa: E402
+from netlist_tracer import BidirectionalTracer, NetlistParser, format_path  # noqa: E402
 
 FIXTURES_DIR = os.path.join(REPO_ROOT, "tests", "fixtures", "vendored")
 GOLDEN_DIR = os.path.join(REPO_ROOT, "tests", "fixtures", "golden")
