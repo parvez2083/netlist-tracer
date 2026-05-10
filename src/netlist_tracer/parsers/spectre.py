@@ -5,20 +5,25 @@ import re
 from typing import Optional
 
 from netlist_tracer.model import Instance, SubcktDef
+from netlist_tracer.parsers.includes import expand_includes
 
 
-def parse_spectre(filename: str) -> tuple[dict[str, SubcktDef], list[Instance]]:
+def parse_spectre(
+    filename: str, include_paths: Optional[list[str]] = None
+) -> tuple[dict[str, SubcktDef], list[Instance]]:
     """Parse Spectre netlist file.
 
     Args:
         filename: Path to Spectre netlist file.
+        include_paths: Optional list of additional search directories for includes.
 
     Returns:
         Tuple of (subckts_dict, instances_list) where subckts_dict maps cell
         names to SubcktDef objects and instances_list is a list of Instance objects.
     """
-    with open(filename) as f:
-        raw_lines = f.readlines()
+    # Expand includes first
+    expanded_lines = expand_includes(filename, "spectre", include_paths)
+    raw_lines = [line_text + "\n" for line_text, _, _ in expanded_lines]
 
     subckts: dict[str, SubcktDef] = {}
     instances: list[Instance] = []
@@ -45,7 +50,6 @@ def parse_spectre(filename: str) -> tuple[dict[str, SubcktDef], list[Instance]]:
     skip_prefixes = (
         "simulator",
         "global",
-        "include",
         "parameters",
         "real",
         "model",
@@ -59,8 +63,9 @@ def parse_spectre(filename: str) -> tuple[dict[str, SubcktDef], list[Instance]]:
     subckt_bodies: dict[str, list[str]] = {}  # cell_name -> list of body lines
     current_subckt = None
     top_level_lines = []
-    # Derive synthetic top-level cell name from filename stem
-    top_cell = os.path.splitext(os.path.basename(filename))[0]
+    # Derive synthetic top-level cell name from filename stem with double-underscore convention
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    top_cell = f"__{stem}__"
 
     for line in lines:
         stripped = line.strip()

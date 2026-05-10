@@ -22,6 +22,13 @@ def main() -> int:
     parser.add_argument("-output", required=True, help="Output JSON file path")
     parser.add_argument("-defines", default=None, help="Comma-separated preprocessor defines")
     parser.add_argument("-top", default=None, help="Top-level cell name (optional)")
+    parser.add_argument(
+        "-I",
+        "--include-path",
+        action="append",
+        default=None,
+        help="Additional directory to search for include files (repeatable)",
+    )
     args = parser.parse_args()
 
     user_defines = set(args.defines.split(",")) if args.defines else None
@@ -31,7 +38,9 @@ def main() -> int:
         return 1
 
     try:
-        nl_parser = NetlistParser(args.netlist, defines=user_defines, top=args.top)
+        nl_parser = NetlistParser(
+            args.netlist, defines=user_defines, top=args.top, include_paths=args.include_path
+        )
     except NetlistParseError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1

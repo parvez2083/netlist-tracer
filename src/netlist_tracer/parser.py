@@ -11,6 +11,7 @@ from netlist_tracer._logging import get_logger
 from netlist_tracer.exceptions import NetlistParseError
 from netlist_tracer.model import Instance, SubcktDef, merge_aliases_into_subckt
 from netlist_tracer.parsers.detect import detect_format
+from netlist_tracer.parsers.edif import parse_edif
 from netlist_tracer.parsers.spectre import parse_spectre
 from netlist_tracer.parsers.spice import parse_spice
 from netlist_tracer.parsers.verilog.instances import _sv_parse_file
@@ -33,6 +34,7 @@ class NetlistParser:
         define_values: Optional[dict[str, int]] = None,
         top: Optional[str] = None,
         workers: int = 0,
+        include_paths: Optional[list[str]] = None,
     ) -> None:
         """Parse a netlist source.
 
@@ -46,6 +48,7 @@ class NetlistParser:
             define_values: Dict of {name: int} for define values.
             top: Optional top-cell name to limit hierarchy.
             workers: Parallel worker count (0 = auto).
+            include_paths: Optional list of additional search directories for includes.
         """
         self.filename = filename
         self.source_path = filename
@@ -54,6 +57,7 @@ class NetlistParser:
         self.define_values = dict(define_values) if define_values else None
         self.top = top
         self.workers = workers
+        self.include_paths = include_paths
         self.subckts: dict[str, SubcktDef] = {}
         self.instances_by_parent: dict[str, list[Instance]] = defaultdict(list)
         self.instances_by_celltype: dict[str, list[Instance]] = defaultdict(list)
@@ -94,6 +98,8 @@ class NetlistParser:
         """Dispatch to format-specific parser."""
         if self.format == "verilog":
             self._parse_verilog()
+        elif self.format == "edif":
+            self._parse_edif()
         elif self.format == "spectre":
             self._parse_spectre()
         else:
@@ -163,7 +169,16 @@ class NetlistParser:
         """Parse SPICE/CDL netlist."""
         if len(self.files) != 1:
             raise NetlistParseError("SPICE parser expects exactly one file")
-        subckts, instances = parse_spice(self.files[0])
+        subckts, instances = parse_spice(self.files[0], include_paths=self.include_paths)
+        self.subckts = subckts
+        for inst in instances:
+            self._add_instance(inst)
+
+    def _parse_edif(self) -> None:
+        """Parse EDIF netlist."""
+        if len(self.files) != 1:
+            raise NetlistParseError("EDIF parser expects exactly one file")
+        subckts, instances = parse_edif(self.files[0])
         self.subckts = subckts
         for inst in instances:
             self._add_instance(inst)
@@ -172,7 +187,7 @@ class NetlistParser:
         """Parse Spectre netlist."""
         if len(self.files) != 1:
             raise NetlistParseError("Spectre parser expects exactly one file")
-        subckts, instances = parse_spectre(self.files[0])
+        subckts, instances = parse_spectre(self.files[0], include_paths=self.include_paths)
         self.subckts = subckts
         for inst in instances:
             self._add_instance(inst)

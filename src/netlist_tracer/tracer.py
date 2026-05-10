@@ -186,6 +186,12 @@ class BidirectionalTracer:
         start_matches = self.resolve_name(start_name)
         if not start_matches:
             print(f"ERROR: '{start_name}' not found as cell type or instance name", file=sys.stderr)
+            # Suggest similar cell names using fuzzy matching
+            import difflib
+            all_cells = list(self.parser.subckts.keys())
+            suggestions = difflib.get_close_matches(start_name, all_cells, n=10, cutoff=0.6)
+            if suggestions:
+                print(f"Did you mean: {suggestions}", file=sys.stderr)
             return []
 
         if max_depth is None and re.match(r"^(VDD|VSS)", start_pin):
@@ -199,6 +205,12 @@ class BidirectionalTracer:
                     f"ERROR: '{target_name}' not found as cell type or instance name",
                     file=sys.stderr,
                 )
+                # Suggest similar cell names using fuzzy matching
+                import difflib
+                all_cells = list(self.parser.subckts.keys())
+                suggestions = difflib.get_close_matches(target_name, all_cells, n=10, cutoff=0.6)
+                if suggestions:
+                    print(f"Did you mean: {suggestions}", file=sys.stderr)
                 return []
             for cell_type, inst_chain in target_matches:
                 leaf_ctx = inst_chain[-1] if inst_chain else None

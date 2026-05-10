@@ -7,6 +7,7 @@ def detect_format(filepaths: list[str]) -> str:
     """Detect netlist format from file content syntax.
 
     Distinguishing markers:
+    - EDIF:     '(edif ' prefix or .edif/.edn/.edf extension
     - Verilog:  'module <name>' keyword
     - Spectre:  'subckt <name>' (no dot) or 'simulator lang=spectre'
     - CDL:      '*.PININFO' comment lines (auCdl-specific)
@@ -16,13 +17,23 @@ def detect_format(filepaths: list[str]) -> str:
         filepaths: List of file paths to scan for format markers.
 
     Returns:
-        Format string: 'verilog', 'spectre', 'cdl', or 'spice'.
+        Format string: 'edif', 'verilog', 'spectre', 'cdl', or 'spice'.
     """
     has_dotsubckt = False
     has_pininfo = False
 
     for filepath in filepaths:
+        # Fast path: check extension
+        if filepath.lower().endswith((".edif", ".edn", ".edf")):
+            return "edif"
+
         with open(filepath) as f:
+            # Check first 4 KB for EDIF marker
+            content_start = f.read(4096)
+            if re.search(r"\(edif\s", content_start, re.IGNORECASE):
+                return "edif"
+            f.seek(0)
+
             for line in f:
                 stripped = line.strip()
                 if not stripped:

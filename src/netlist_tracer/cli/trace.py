@@ -57,6 +57,13 @@ def main() -> int:
         default="text",
         help="Output format: text (default) or JSON",
     )
+    parser.add_argument(
+        "-I",
+        "--include-path",
+        action="append",
+        default=None,
+        help="Additional directory to search for include files (repeatable)",
+    )
     args = parser.parse_args()
 
     # Set logging level for JSON output
@@ -88,7 +95,11 @@ def main() -> int:
         return 1
 
     try:
-        nl_parser = NetlistParser(netlist_file, defines=user_defines if user_defines else None)
+        nl_parser = NetlistParser(
+            netlist_file,
+            defines=user_defines if user_defines else None,
+            include_paths=args.include_path,
+        )
     except NetlistParseError as e:
         print(f"ERROR: {e}")
         return 1
@@ -105,6 +116,12 @@ def main() -> int:
             f"ERROR: '{start_name}' not found as cell type or instance name",
             file=sys.stderr,
         )
+        # Suggest similar cell names using fuzzy matching
+        import difflib
+        all_cells = list(nl_parser.subckts.keys())
+        suggestions = difflib.get_close_matches(start_name, all_cells, n=10, cutoff=0.6)
+        if suggestions:
+            print(f"Did you mean: {suggestions}", file=sys.stderr)
         return 1
 
     # Trace all requested pins
