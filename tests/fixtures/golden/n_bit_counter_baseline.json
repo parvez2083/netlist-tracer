@@ -1,0 +1,115 @@
+{
+  "fixture": "n_bit_counter.edf",
+  "parser": {
+    "format": "edif",
+    "subckt_count": 7,
+    "subckt_names_sorted": [
+      "FDCE",
+      "INV",
+      "LUT1",
+      "LUT3",
+      "LUT4",
+      "LUT5",
+      "n_bit_counter"
+    ],
+    "subckts": {
+      "FDCE": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 5,
+        "pins": [
+          "Q",
+          "C",
+          "CE",
+          "CLR",
+          "D"
+        ]
+      },
+      "INV": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 2,
+        "pins": [
+          "I",
+          "O"
+        ]
+      },
+      "LUT1": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 2,
+        "pins": [
+          "O",
+          "I0"
+        ]
+      },
+      "LUT3": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 4,
+        "pins": [
+          "O",
+          "I0",
+          "I1",
+          "I2"
+        ]
+      },
+      "LUT4": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 5,
+        "pins": [
+          "O",
+          "I0",
+          "I1",
+          "I2",
+          "I3"
+        ]
+      },
+      "LUT5": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 6,
+        "pins": [
+          "O",
+          "I0",
+          "I1",
+          "I2",
+          "I3",
+          "I4"
+        ]
+      },
+      "n_bit_counter": {
+        "alias_count": 0,
+        "child_instance_count": 8,
+        "pin_count": 8,
+        "pins": [
+          "clk",
+          "rst",
+          "en",
+          "up",
+          "counter[3]",
+          "counter[2]",
+          "counter[1]",
+          "counter[0]"
+        ]
+      }
+    },
+    "total_instance_count": 8
+  },
+  "source_url": "https://github.com/byuccl/spydrnet",
+  "trace": {
+    "max_depth": null,
+    "paths": [
+      "n_bit_counter|<internal>|clk -- FDCE|counter_reg_reg_0_|C",
+      "n_bit_counter|<internal>|clk -- FDCE|counter_reg_reg_1_|C",
+      "n_bit_counter|<internal>|clk -- FDCE|counter_reg_reg_2_|C",
+      "n_bit_counter|<internal>|clk -- FDCE|counter_reg_reg_3_|C"
+    ],
+    "raw_path_count": 4,
+    "start_cell": "n_bit_counter",
+    "start_pin": "clk",
+    "unique_path_count": 4
+  },
+  "vendored_sha": "2e7b78a5d04b2d77c630c4c75c97be12095a13fc"
+}

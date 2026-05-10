@@ -118,3 +118,240 @@ def test_cli_trace_format_json() -> None:
             assert "cell" in first_step, "Missing 'cell' in step"
             assert "pin_or_net" in first_step, "Missing 'pin_or_net' in step"
             assert "direction" in first_step, "Missing 'direction' in step"
+
+
+def test_cli_auto_detect_edif() -> None:
+    """Verify -netlist with EDIF file auto-detects format without -format flag."""
+    import tempfile
+
+    repo_root = Path(__file__).parent.parent
+    netlist_path = repo_root / "tests/fixtures/vendored/AND_gate.edf"
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        result = subprocess.run(
+            [
+                "netlist-parser",
+                "-netlist",
+                str(netlist_path),
+                "-output",
+                str(tmp_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, f"CLI failed: {result.stderr}"
+        with open(tmp_path) as f:
+            data = json.load(f)
+        assert data["format"] == "edif", "EDIF format should be auto-detected"
+    finally:
+        import os
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+def test_cli_edif_bad_cell_suggestion() -> None:
+    """Verify CLI provides suggestions when EDIF cell not found."""
+    repo_root = Path(__file__).parent.parent
+    netlist_path = repo_root / "tests/fixtures/vendored/AND_gate.edf"
+
+    result = subprocess.run(
+        [
+            "netlist-tracer",
+            "-netlist",
+            str(netlist_path),
+            "-cell",
+            "logic_gat",  # Near-miss to trigger fuzzy suggestion
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0, "Should fail for nonexistent cell"
+    assert "Did you mean" in result.stderr, "Should provide fuzzy suggestion"
+    assert "logic_gate" in result.stderr, "Suggestion should include correct cell name"
+
+
+def test_cli_edif_bad_pin_suggestion() -> None:
+    """Verify CLI provides suggestions when EDIF pin not found."""
+    repo_root = Path(__file__).parent.parent
+    netlist_path = repo_root / "tests/fixtures/vendored/AND_gate.edf"
+
+    result = subprocess.run(
+        [
+            "netlist-tracer",
+            "-netlist",
+            str(netlist_path),
+            "-cell",
+            "logic_gate",
+            "-pin",
+            "qx",  # Near-miss to 'q' to trigger fuzzy suggestion
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0, "Should fail for nonexistent pin"
+    # Pin suggestions are printed to stdout, not stderr
+    assert "Did you mean" in (result.stderr + result.stdout), "Should provide fuzzy suggestion"
+
+
+def test_cli_edif_extension_edn() -> None:
+    """Verify CLI auto-detects .edn EDIF extension."""
+    import tempfile
+
+    repo_root = Path(__file__).parent.parent
+    # Read AND_gate.edf content
+    edif_path = repo_root / "tests/fixtures/vendored/AND_gate.edf"
+    with open(edif_path) as f:
+        edif_content = f.read()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a temp .edn file with EDIF content
+        edn_path = Path(tmpdir) / "test_design.edn"
+        edn_path.write_text(edif_content)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            result = subprocess.run(
+                [
+                    "netlist-parser",
+                    "-netlist",
+                    str(edn_path),
+                    "-output",
+                    str(tmp_path),
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+            assert result.returncode == 0, f"CLI failed: {result.stderr}"
+            with open(tmp_path) as f:
+                data = json.load(f)
+            assert data["format"] == "edif", ".edn extension should be auto-detected as EDIF"
+        finally:
+            import os
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+
+def test_cli_include_path_flag() -> None:
+    """Verify -include_path flag resolves include files from specified directory."""
+    import os
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create child.sp
+        child_file = os.path.join(tmpdir, "child.sp")
+        with open(child_file, "w") as f:
+            f.write(".subckt CHILD a b\n")
+            f.write("R1 a b res=1k\n")
+            f.write(".ends CHILD\n")
+
+        # Create parent.sp in repo (not in tmpdir)
+        repo_root = Path(__file__).parent.parent
+        parent_file = repo_root / "tests" / "fixtures" / "synthetic" / "temp_parent.sp"
+        with open(parent_file, "w") as f:
+            f.write(".include 'child.sp'\n")
+            f.write(".subckt PARENT a b\n")
+            f.write("X1 a b CHILD\n")
+            f.write(".ends PARENT\n")
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            result = subprocess.run(
+                [
+                    "netlist-parser",
+                    "-netlist",
+                    str(parent_file),
+                    "-output",
+                    str(tmp_path),
+                    "-I",
+                    str(tmpdir),
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+            assert result.returncode == 0, f"CLI failed: {result.stderr}"
+            with open(tmp_path) as f:
+                data = json.load(f)
+            assert "PARENT" in data["subckts"], "PARENT should be parsed"
+            assert "CHILD" in data["subckts"], "CHILD should be resolved via include_path"
+        finally:
+            if parent_file.exists():
+                parent_file.unlink()
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+
+def test_cli_include_path_flag_repeated() -> None:
+    """Verify -include_path flag can be repeated for multiple search directories."""
+    import os
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir1:
+        with tempfile.TemporaryDirectory() as tmpdir2:
+            # Create child1.sp in tmpdir1
+            child1_file = os.path.join(tmpdir1, "child1.sp")
+            with open(child1_file, "w") as f:
+                f.write(".subckt CHILD1 a b\n")
+                f.write("R1 a b res=1k\n")
+                f.write(".ends CHILD1\n")
+
+            # Create child2.sp in tmpdir2
+            child2_file = os.path.join(tmpdir2, "child2.sp")
+            with open(child2_file, "w") as f:
+                f.write(".subckt CHILD2 a b\n")
+                f.write("R1 a b res=2k\n")
+                f.write(".ends CHILD2\n")
+
+            # Create parent.sp
+            repo_root = Path(__file__).parent.parent
+            parent_file = repo_root / "tests" / "fixtures" / "synthetic" / "temp_parent2.sp"
+            with open(parent_file, "w") as f:
+                f.write(".include 'child1.sp'\n")
+                f.write(".include 'child2.sp'\n")
+                f.write(".subckt PARENT a b c d\n")
+                f.write("X1 a b CHILD1\n")
+                f.write("X2 c d CHILD2\n")
+                f.write(".ends PARENT\n")
+
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+                tmp_path = tmp.name
+
+            try:
+                result = subprocess.run(
+                    [
+                        "netlist-parser",
+                        "-netlist",
+                        str(parent_file),
+                        "-output",
+                        str(tmp_path),
+                        "-I",
+                        str(tmpdir1),
+                        "-I",
+                        str(tmpdir2),
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+
+                assert result.returncode == 0, f"CLI failed: {result.stderr}"
+                with open(tmp_path) as f:
+                    data = json.load(f)
+                assert "PARENT" in data["subckts"], "PARENT should be parsed"
+                assert "CHILD1" in data["subckts"], "CHILD1 should be resolved from tmpdir1"
+                assert "CHILD2" in data["subckts"], "CHILD2 should be resolved from tmpdir2"
+            finally:
+                if parent_file.exists():
+                    parent_file.unlink()
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)

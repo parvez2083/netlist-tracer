@@ -42,6 +42,12 @@ def synthetic_spice_basic_sp(fixtures_synthetic_dir):
 
 
 @pytest.fixture
+def synthetic_spice_flat_deck_sp(fixtures_synthetic_dir):
+    """Path to synthetic spice_flat_deck.sp fixture (flat-deck testbench)."""
+    return os.path.join(fixtures_synthetic_dir, "spice_flat_deck.sp")
+
+
+@pytest.fixture
 def synthetic_cdl_basic_cdl(fixtures_synthetic_dir):
     """Path to synthetic cdl_basic.cdl fixture."""
     return os.path.join(fixtures_synthetic_dir, "cdl_basic.cdl")
@@ -69,3 +75,27 @@ def fixtures_vendored_dir():
 def vendored_picorv32_v(fixtures_vendored_dir):
     """Path to vendored picorv32.v fixture."""
     return os.path.join(fixtures_vendored_dir, "picorv32.v")
+
+
+@pytest.fixture
+def vendored_AND_gate_edf(fixtures_vendored_dir):
+    """Path to vendored AND_gate.edf fixture."""
+    return os.path.join(fixtures_vendored_dir, "AND_gate.edf")
+
+
+@pytest.fixture
+def vendored_n_bit_counter_edf(fixtures_vendored_dir):
+    """Path to vendored n_bit_counter.edf fixture."""
+    return os.path.join(fixtures_vendored_dir, "n_bit_counter.edf")
+
+
+@pytest.fixture
+def vendored_one_counter_edf(fixtures_vendored_dir):
+    """Path to vendored one_counter.edf fixture."""
+    return os.path.join(fixtures_vendored_dir, "one_counter.edf")
+
+
+@pytest.fixture
+def vendored_hic2_ft_sp(fixtures_vendored_dir):
+    """Path to vendored hic2_ft.sp NGSpice fixture."""
+    return os.path.join(fixtures_vendored_dir, "ngspice", "hic2_ft.sp")

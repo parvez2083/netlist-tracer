@@ -1,0 +1,21 @@
+{
+  "fixture": "ngspice/hic2_ft.sp",
+  "license": "GPL-2.0-or-later",
+  "ngspice_version": "43",
+  "parser": {
+    "format": "spice",
+    "subckt_count": 0,
+    "subckt_names_sorted": [],
+    "subckts": {},
+    "total_instance_count": 0
+  },
+  "source_url": "http://ngspice.sourceforge.io/",
+  "trace": {
+    "max_depth": null,
+    "paths": [],
+    "raw_path_count": 0,
+    "start_cell": "hic2_ft",
+    "start_pin": "C",
+    "unique_path_count": 0
+  }
+}

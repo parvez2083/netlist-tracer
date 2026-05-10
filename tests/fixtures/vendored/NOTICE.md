@@ -41,6 +41,57 @@ embedded copyright/license header is prohibited.
   in the file itself). The `netlist-tracer` package proper remains MIT-licensed;
   this single vendored test fixture is Apache-2.0.
 
+## AND_gate.edf
+
+- **Source**: https://github.com/byuccl/spydrnet
+- **Upstream path**: `/example_netlists/EDIF_netlists/AND_gate.edf`
+- **Branch**: `master`
+- **Commit SHA at vendor time**: `2e7b78a5d04b2d77c630c4c75c97be12095a13fc`
+- **Vendored on**: 2026-05-10
+- **License**: BSD 3-Clause (see https://github.com/byuccl/spydrnet/blob/master/LICENSE)
+- **Copyright**: Copyright (c) Brigham Young University, Circuit Lab Team
+- **MIT compatibility**: BSD-3-Clause is MIT-compatible.
+
+## n_bit_counter.edf
+
+- **Source**: https://github.com/byuccl/spydrnet
+- **Upstream path**: `/example_netlists/EDIF_netlists/n_bit_counter.edf`
+- **Branch**: `master`
+- **Commit SHA at vendor time**: `2e7b78a5d04b2d77c630c4c75c97be12095a13fc`
+- **Vendored on**: 2026-05-10
+- **License**: BSD 3-Clause
+- **Copyright**: Copyright (c) Brigham Young University, Circuit Lab Team
+- **MIT compatibility**: BSD-3-Clause is MIT-compatible.
+
+## one_counter.edf
+
+- **Source**: https://github.com/byuccl/spydrnet
+- **Upstream path**: `/example_netlists/EDIF_netlists/one_counter.edf`
+- **Branch**: `master`
+- **Commit SHA at vendor time**: `2e7b78a5d04b2d77c630c4c75c97be12095a13fc`
+- **Vendored on**: 2026-05-10
+- **License**: BSD 3-Clause
+- **Copyright**: Copyright (c) Brigham Young University, Circuit Lab Team
+- **MIT compatibility**: BSD-3-Clause is MIT-compatible.
+
+## hicum2/hic2_ft.sp and hicum2/model-card-examples.lib
+
+- **Source**: http://ngspice.sourceforge.io/ (NGSpice project)
+- **Upstream path**: `/examples/hicum2/hic2_ft.sp` and `model-card-examples.lib`
+- **NGSpice version**: 43
+- **File SHA-256** (verifiable via `sha256sum` against the vendored files):
+  - `hic2_ft.sp`: `8259e5353605276398cfbb4f74c291feb9c5a20125e4cc8c22530a0da1470675`
+  - `model-card-examples.lib`: `fc6c7024fde7745e28c6ba718f40c77439611aa4eaa890bd677b2c874377e89b`
+- **Vendored on**: 2026-05-10
+- **License**: GPL-2.0-or-later (see https://sourceforge.net/projects/ngspice/)
+- **Copyright**: Copyright (c) NGSpice Team
+- **MIT compatibility note**: These vendored test fixtures (separate works) are
+  distributed under GPL-2.0-or-later per their upstream license. The `netlist-tracer`
+  source code itself remains MIT-licensed. These fixtures are used as parser input
+  only — they are not linked into, compiled with, or derived from the netlist-tracer
+  codebase. The GPL-2.0-or-later license applies exclusively to the `.sp` and `.lib`
+  files in `ngspice/`; the netlist-tracer source code's MIT license is unaffected.
+
 ---
 
 ## Refresh procedure

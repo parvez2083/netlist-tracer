@@ -1,0 +1,164 @@
+{
+  "fixture": "one_counter.edf",
+  "parser": {
+    "format": "edif",
+    "subckt_count": 13,
+    "subckt_names_sorted": [
+      "BUFG",
+      "FD",
+      "FDC",
+      "GND",
+      "IBUF",
+      "IBUFG",
+      "INV",
+      "LUT3",
+      "MUXCY_L",
+      "OBUF",
+      "XORCY",
+      "counter",
+      "one_counter"
+    ],
+    "subckts": {
+      "BUFG": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 2,
+        "pins": [
+          "I",
+          "O"
+        ]
+      },
+      "FD": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 3,
+        "pins": [
+          "Q",
+          "D",
+          "C"
+        ]
+      },
+      "FDC": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 4,
+        "pins": [
+          "Q",
+          "D",
+          "C",
+          "CLR"
+        ]
+      },
+      "GND": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 1,
+        "pins": [
+          "G"
+        ]
+      },
+      "IBUF": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 2,
+        "pins": [
+          "O",
+          "I"
+        ]
+      },
+      "IBUFG": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 2,
+        "pins": [
+          "O",
+          "I"
+        ]
+      },
+      "INV": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 2,
+        "pins": [
+          "I",
+          "O"
+        ]
+      },
+      "LUT3": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 4,
+        "pins": [
+          "I0",
+          "I1",
+          "I2",
+          "O"
+        ]
+      },
+      "MUXCY_L": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 4,
+        "pins": [
+          "DI",
+          "CI",
+          "S",
+          "LO"
+        ]
+      },
+      "OBUF": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 2,
+        "pins": [
+          "O",
+          "I"
+        ]
+      },
+      "XORCY": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 3,
+        "pins": [
+          "LI",
+          "CI",
+          "O"
+        ]
+      },
+      "counter": {
+        "alias_count": 0,
+        "child_instance_count": 32,
+        "pin_count": 5,
+        "pins": [
+          "output",
+          "load_num",
+          "reset_i",
+          "clk",
+          "reset"
+        ]
+      },
+      "one_counter": {
+        "alias_count": 0,
+        "child_instance_count": 23,
+        "pin_count": 4,
+        "pins": [
+          "xp_in",
+          "xp_out",
+          "XP_PCLK",
+          "XP_RST"
+        ]
+      }
+    },
+    "total_instance_count": 55
+  },
+  "source_url": "https://github.com/byuccl/spydrnet",
+  "trace": {
+    "max_depth": null,
+    "paths": [],
+    "raw_path_count": 0,
+    "start_cell": "one_counter",
+    "start_pin": "XP_PCLK",
+    "unique_path_count": 0
+  },
+  "vendored_sha": "2e7b78a5d04b2d77c630c4c75c97be12095a13fc"
+}

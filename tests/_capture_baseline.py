@@ -137,6 +137,50 @@ def capture_sky130_inv() -> dict[str, Any]:
     }
 
 
+def capture_AND_gate() -> dict[str, Any]:
+    src = os.path.join(FIXTURES_DIR, "AND_gate.edf")
+    parser = NetlistParser(src)
+    tracer = BidirectionalTracer(parser)
+    # Trace start: top cell 'logic_gate', input pin 'a'.
+    return {
+        "fixture": "AND_gate.edf",
+        "source_url": "https://github.com/byuccl/spydrnet",
+        "vendored_sha": "2e7b78a5d04b2d77c630c4c75c97be12095a13fc",
+        "parser": parser_snapshot(parser),
+        "trace": trace_snapshot(tracer, start_cell="logic_gate", start_pin="a"),
+    }
+
+
+def capture_n_bit_counter() -> dict[str, Any]:
+    src = os.path.join(FIXTURES_DIR, "n_bit_counter.edf")
+    parser = NetlistParser(src)
+    tracer = BidirectionalTracer(parser)
+    # Trace start: top cell 'n_bit_counter', clock pin 'clk'.
+    return {
+        "fixture": "n_bit_counter.edf",
+        "source_url": "https://github.com/byuccl/spydrnet",
+        "vendored_sha": "2e7b78a5d04b2d77c630c4c75c97be12095a13fc",
+        "parser": parser_snapshot(parser),
+        "trace": trace_snapshot(tracer, start_cell="n_bit_counter", start_pin="clk"),
+    }
+
+
+def capture_one_counter() -> dict[str, Any]:
+    src = os.path.join(FIXTURES_DIR, "one_counter.edf")
+    parser = NetlistParser(src)
+    tracer = BidirectionalTracer(parser)
+    # Trace start: top cell 'one_counter', clock pin 'XP_PCLK'.
+    return {
+        "fixture": "one_counter.edf",
+        "source_url": "https://github.com/byuccl/spydrnet",
+        "vendored_sha": "2e7b78a5d04b2d77c630c4c75c97be12095a13fc",
+        "parser": parser_snapshot(parser),
+        "trace": trace_snapshot(tracer, start_cell="one_counter", start_pin="XP_PCLK"),
+    }
+
+
+
+
 # --- driver ---------------------------------------------------------------
 
 
@@ -159,6 +203,9 @@ def main() -> int:
     for name, capturer in [
         ("picorv32", capture_picorv32),
         ("sky130_fd_sc_hd__inv_1", capture_sky130_inv),
+        ("AND_gate", capture_AND_gate),
+        ("n_bit_counter", capture_n_bit_counter),
+        ("one_counter", capture_one_counter),
     ]:
         print(f"=== Capturing baseline: {name} ===")
         try:

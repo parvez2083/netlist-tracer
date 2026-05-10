@@ -47,3 +47,38 @@ def test_cdl_supply_constant_instance(synthetic_supply_constant_cdl):
     insts = parser.instances_by_parent.get("top_supply", [])
     assert len(insts) == 1
     assert insts[0].cell_type == "supply_constant"
+
+
+def test_spice_flat_deck_synthesizes_top(synthetic_spice_flat_deck_sp):
+    """Test that SPICE flat-deck testbench synthesizes a synthetic top-level cell."""
+    parser = NetlistParser(synthetic_spice_flat_deck_sp)
+    assert "__spice_flat_deck__" in parser.subckts, (
+        f"Synthetic top '__spice_flat_deck__' not found. Subckts: {list(parser.subckts.keys())}"
+    )
+    synthetic_top = parser.subckts["__spice_flat_deck__"]
+    assert synthetic_top.pins == [], f"Synthetic top should have empty pins, got {synthetic_top.pins}"
+
+
+def test_spice_flat_deck_top_level_instances_captured(synthetic_spice_flat_deck_sp):
+    """Test that top-level X-instances are captured into the synthetic top."""
+    parser = NetlistParser(synthetic_spice_flat_deck_sp)
+    top_instances = parser.instances_by_parent.get("__spice_flat_deck__", [])
+    assert len(top_instances) == 2, (
+        f"Expected 2 top-level instances, got {len(top_instances)}: {top_instances}"
+    )
+    cell_types = {inst.cell_type for inst in top_instances}
+    assert cell_types == {"mac6_top", "ldo_aux"}, (
+        f"Expected cell types {{'mac6_top', 'ldo_aux'}}, got {cell_types}"
+    )
+
+
+def test_spice_hierarchical_no_synthesis(synthetic_spice_basic_sp):
+    """Test that pure hierarchical SPICE decks do not synthesize a synthetic top."""
+    parser = NetlistParser(synthetic_spice_basic_sp)
+    synthetic_tops = [name for name in parser.subckts.keys() if name.startswith("__")]
+    assert len(synthetic_tops) == 0, (
+        f"Hierarchical deck should not have synthetic tops, but found: {synthetic_tops}"
+    )
+    # Verify expected cells are still present
+    assert "nand2" in parser.subckts
+    assert "top_spice" in parser.subckts

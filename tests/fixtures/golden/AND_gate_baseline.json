@@ -1,0 +1,76 @@
+{
+  "fixture": "AND_gate.edf",
+  "parser": {
+    "format": "edif",
+    "subckt_count": 5,
+    "subckt_names_sorted": [
+      "IBUF",
+      "INV",
+      "LUT2",
+      "OBUF",
+      "logic_gate"
+    ],
+    "subckts": {
+      "IBUF": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 2,
+        "pins": [
+          "O",
+          "I"
+        ]
+      },
+      "INV": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 2,
+        "pins": [
+          "I",
+          "O"
+        ]
+      },
+      "LUT2": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 3,
+        "pins": [
+          "O",
+          "I0",
+          "I1"
+        ]
+      },
+      "OBUF": {
+        "alias_count": 0,
+        "child_instance_count": 0,
+        "pin_count": 2,
+        "pins": [
+          "O",
+          "I"
+        ]
+      },
+      "logic_gate": {
+        "alias_count": 0,
+        "child_instance_count": 4,
+        "pin_count": 3,
+        "pins": [
+          "a",
+          "b",
+          "q"
+        ]
+      }
+    },
+    "total_instance_count": 4
+  },
+  "source_url": "https://github.com/byuccl/spydrnet",
+  "trace": {
+    "max_depth": null,
+    "paths": [
+      "logic_gate|<internal>|a -- IBUF|a_IBUF_inst|I"
+    ],
+    "raw_path_count": 1,
+    "start_cell": "logic_gate",
+    "start_pin": "a",
+    "unique_path_count": 1
+  },
+  "vendored_sha": "2e7b78a5d04b2d77c630c4c75c97be12095a13fc"
+}
