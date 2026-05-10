@@ -64,6 +64,7 @@ class NetlistParser:
         self.instances_by_name: dict[str, list[Instance]] = defaultdict(list)
         self.format = "spice"
         self.files: list[str] = []
+        self.global_nets: list[str] = []
 
         # JSON cache: load pre-parsed data directly
         if os.path.isfile(filename) and filename.endswith(".json"):
@@ -169,8 +170,11 @@ class NetlistParser:
         """Parse SPICE/CDL netlist."""
         if len(self.files) != 1:
             raise NetlistParseError("SPICE parser expects exactly one file")
-        subckts, instances = parse_spice(self.files[0], include_paths=self.include_paths)
+        subckts, instances, global_nets = parse_spice(
+            self.files[0], include_paths=self.include_paths
+        )
         self.subckts = subckts
+        self.global_nets = global_nets
         for inst in instances:
             self._add_instance(inst)
 

@@ -99,3 +99,63 @@ def vendored_one_counter_edf(fixtures_vendored_dir):
 def vendored_hic2_ft_sp(fixtures_vendored_dir):
     """Path to vendored hic2_ft.sp NGSpice fixture."""
     return os.path.join(fixtures_vendored_dir, "ngspice", "hic2_ft.sp")
+
+
+@pytest.fixture
+def synthetic_spice_inline_comments_sp(fixtures_synthetic_dir):
+    """Path to synthetic spice_inline_comments.sp fixture."""
+    return os.path.join(fixtures_synthetic_dir, "spice_inline_comments.sp")
+
+
+@pytest.fixture
+def synthetic_spice_continuation_across_comment_sp(fixtures_synthetic_dir):
+    """Path to synthetic spice_continuation_across_comment.sp fixture."""
+    return os.path.join(fixtures_synthetic_dir, "spice_continuation_across_comment.sp")
+
+
+@pytest.fixture
+def synthetic_spice_controlled_sources_sp(fixtures_synthetic_dir):
+    """Path to synthetic spice_controlled_sources.sp fixture."""
+    return os.path.join(fixtures_synthetic_dir, "spice_controlled_sources.sp")
+
+
+@pytest.fixture
+def synthetic_spice_coupled_inductor_sp(fixtures_synthetic_dir):
+    """Path to synthetic spice_coupled_inductor.sp fixture."""
+    return os.path.join(fixtures_synthetic_dir, "spice_coupled_inductor.sp")
+
+
+@pytest.fixture
+def synthetic_spice_global_directive_sp(fixtures_synthetic_dir):
+    """Path to synthetic spice_global_directive.sp fixture."""
+    return os.path.join(fixtures_synthetic_dir, "spice_global_directive.sp")
+
+
+@pytest.fixture
+def synthetic_spice_edge_crlf_sp(fixtures_synthetic_dir):
+    """Path to synthetic spice_edge_crlf.sp fixture."""
+    return os.path.join(fixtures_synthetic_dir, "spice_edge_crlf.sp")
+
+
+@pytest.fixture
+def synthetic_spice_edge_utf8_bom_sp(fixtures_synthetic_dir):
+    """Path to synthetic spice_edge_utf8_bom.sp fixture."""
+    return os.path.join(fixtures_synthetic_dir, "spice_edge_utf8_bom.sp")
+
+
+@pytest.fixture
+def synthetic_spice_edge_long_line_sp(fixtures_synthetic_dir):
+    """Path to synthetic spice_edge_long_line.sp fixture."""
+    return os.path.join(fixtures_synthetic_dir, "spice_edge_long_line.sp")
+
+
+@pytest.fixture
+def synthetic_spice_edge_tab_continuation_sp(fixtures_synthetic_dir):
+    """Path to synthetic spice_edge_tab_continuation.sp fixture."""
+    return os.path.join(fixtures_synthetic_dir, "spice_edge_tab_continuation.sp")
+
+
+@pytest.fixture
+def synthetic_spice_edge_mixed_case_sp(fixtures_synthetic_dir):
+    """Path to synthetic spice_edge_mixed_case.sp fixture."""
+    return os.path.join(fixtures_synthetic_dir, "spice_edge_mixed_case.sp")
