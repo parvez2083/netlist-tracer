@@ -118,6 +118,37 @@ _PRIMITIVES = frozenset(
     }
 )
 
+
+def _primitive_pin_names(prim_type: str, arity: int) -> list[str]:
+    """
+    Generate pin names for a built-in primitive gate based on its type and arity.
+
+    For and/or/nand/nor/xor/xnor: output first, then inputs (arity-1 inputs).
+    For buf/not: outputs first (arity-1 outputs), then single input.
+    For other primitives: generic _pN naming.
+
+    Inputs:
+        prim_type: Primitive type (and, nand, buf, not, etc.)
+        arity: Total number of pins
+
+    Outputs:
+        Ordered list of pin names [pin0, pin1, ...]
+    """
+    if prim_type in {"and", "nand", "or", "nor", "xor", "xnor"}:
+        # Output first, then inputs
+        if arity < 2:
+            return [f"_p{i}" for i in range(arity)]
+        return ["out"] + [f"in{i}" for i in range(arity - 1)]
+    elif prim_type in {"buf", "not"}:
+        # Outputs first, then single input
+        if arity < 2:
+            return [f"_p{i}" for i in range(arity)]
+        return [f"out{i}" for i in range(arity - 1)] + ["in"]
+    else:
+        # Generic naming for other primitives
+        return [f"_p{i}" for i in range(arity)]
+
+
 _RE_BUS_DECL = re.compile(
     r"\b(?:input|output|inout|wire|logic|reg)\s+(?:wire\s+|logic\s+|reg\s+)?"
     r"\[\s*(\d+)\s*:\s*(\d+)\s*\]\s+(\w+)"
@@ -143,6 +174,8 @@ _RE_GENFOR = re.compile(
     r"\bfor\s*\(\s*(?:genvar\s+)?(?:int\s+)?(\w+)\s*=\s*([^;]+?)\s*;\s*\w+\s*(<=?)\s*([^;]+?)\s*;\s*([^)]+?)\s*\)"
     r"\s*begin\s*:\s*(\w+)"
 )
+_RE_GENIF = re.compile(r"\bgenerate\s+if\s*\(((?:[^()]|\([^()]*\))*?)\)\s*begin\s*(?::(\w+))?")
+_RE_GENCASE = re.compile(r"\bgenerate\s+case\s*\(((?:[^()]|\([^()]*\))*?)\)")
 
 
 def _sv_make_port_entry(name: str, hi: Optional[int] = None, lo: Optional[int] = None) -> dict:
@@ -446,6 +479,46 @@ def _sv_find_begin_end(text: str, begin_pos: int) -> int:
     return i
 
 
+def _sv_eval_condition(
+    cond_expr: str, define_values: Optional[dict[str, int]] = None
+) -> Optional[bool]:
+    """
+    Evaluate a simple generate-if condition expression.
+
+    Supports comparison operators: ==, !=, <, <=, >, >= and logical operators: &&, ||.
+    If condition cannot be fully resolved, returns None to preserve block verbatim.
+
+    Inputs:
+        cond_expr: The condition expression (e.g., "WIDTH > 0", "MODE == 2")
+        define_values: Dict of resolved parameter values (optional, defaults to {})
+
+    Outputs:
+        bool if condition evaluates to a definite truth value, None if unresolvable
+    """
+    if define_values is None:
+        define_values = {}
+    expr = cond_expr.strip()
+    # Try to resolve all identifiers
+    for match in re.finditer(r"\b([A-Za-z_]\w*)\b", expr):
+        name = match.group(1)
+        if name not in define_values and not name.isdigit():
+            # Unresolvable identifier
+            return None
+    # Perform substitution
+    resolved = expr
+    for name, val in sorted(define_values.items(), key=lambda x: -len(x[0])):
+        resolved = re.sub(r"\b" + re.escape(name) + r"\b", str(val), resolved)
+    # Evaluate simple comparison expressions
+    try:
+        # Replace logical operators with Python equivalents
+        resolved = re.sub(r"&&", " and ", resolved)
+        resolved = re.sub(r"\|\|", " or ", resolved)
+        # Safe evaluation (Python handles >=, <=, >, <, ==, != natively)
+        return bool(eval(resolved))  # noqa: S307
+    except Exception:
+        return None
+
+
 def _sv_parse_step(incr_expr: str, define_values: Optional[dict[str, int]] = None) -> Optional[int]:
     """Parse generate-for loop step expression."""
     if define_values is None:
@@ -674,6 +747,232 @@ def _sv_unroll_generate_for_blocks(
     return current_body
 
 
+def _sv_unroll_generate_blocks_to_fixed_point(
+    body: str, define_values: Optional[dict[str, int]] = None
+) -> str:
+    """
+    Unroll all generate blocks (for, if, case) to fixed-point.
+
+    Iterates unrolling until no more generate blocks remain (fixed-point), or until
+    max depth (8 iterations) is reached. Handles generate-for, generate-if, and
+    generate-case blocks by repeated single-pass unrolls.
+
+    Inputs:
+        body: Raw module body text
+        define_values: Resolved parameter/macro values for bound resolution (optional, defaults to {})
+
+    Outputs:
+        Transformed body string with all generate blocks unrolled to concrete indices.
+        If a block has unresolvable conditions, it is preserved verbatim.
+        If max depth (8) is reached, returns partial result with warning logged.
+    """
+    if define_values is None:
+        define_values = {}
+
+    max_depth = 8
+    prev_body = None
+    current_body = body
+    iteration = 0
+
+    while iteration < max_depth:
+        prev_body = current_body
+        # Single-pass unroll attempt
+        current_body = _sv_unroll_generate_for_blocks_once(current_body, define_values)
+        # Also handle generate-if blocks
+        current_body = _sv_unroll_generate_if_blocks_once(current_body, define_values)
+        # Also handle generate-case blocks
+        current_body = _sv_unroll_generate_case_blocks_once(current_body, define_values)
+        iteration += 1
+
+        # Reached fixed-point (no change in this iteration)
+        if current_body == prev_body:
+            break
+
+    has_remaining_blocks = bool(
+        _RE_GENFOR.search(current_body)
+        or _RE_GENIF.search(current_body)
+        or _RE_GENCASE.search(current_body)
+    )
+    if iteration >= max_depth and has_remaining_blocks:
+        _logger.warning(
+            f"WARNING: generate-block unrolling reached max depth ({max_depth}) with unresolved blocks remaining. "
+            "Returning partial result. Check for infinite or pathological loop structures."
+        )
+
+    return current_body
+
+
+def _sv_unroll_generate_if_blocks_once(
+    body: str, define_values: Optional[dict[str, int]] = None
+) -> str:
+    """
+    Single-pass unroll of generate-if blocks.
+
+    For each generate-if block, evaluate the condition. If true, keep the if-branch body.
+    If false, keep the else-branch body (if present). If unresolvable, preserve block verbatim.
+
+    Inputs:
+        body: Raw module body text
+        define_values: Resolved parameter/macro values for bound resolution (optional, defaults to {})
+
+    Outputs:
+        Transformed body string with one level of generate-if blocks unrolled.
+    """
+    if define_values is None:
+        define_values = {}
+
+    result = []
+    last = 0
+
+    for m in _RE_GENIF.finditer(body):
+        if m.start() < last:
+            continue
+        result.append(body[last : m.start()])
+
+        cond_expr = m.group(1).strip()
+        _if_label = m.group(2)  # noqa: F841
+
+        cond_val = _sv_eval_condition(cond_expr, define_values)
+
+        # If condition is unresolvable, preserve block verbatim
+        if cond_val is None:
+            # Find the matching endgenerate
+            begin_pos = m.end()
+            block_end = _sv_find_generate_end(body, begin_pos)
+            result.append(body[m.start() : block_end])
+            last = block_end
+            continue
+
+        # Condition is resolvable; extract the if and optional else branches
+        begin_pos = m.end()
+        # Find the matching "end" for this "begin"
+        if_end = _sv_find_begin_end(body, begin_pos)
+        if_body_start = begin_pos
+        if_body_end = body.rfind("end", begin_pos, if_end)
+
+        if_body = body[if_body_start:if_body_end].strip()
+
+        # Look for else clause
+        else_body = ""
+        search_pos = if_body_end
+        else_match = re.match(r"\s*end\s+else\s+begin", body[search_pos:])
+        if else_match:
+            else_start = search_pos + else_match.end()
+            else_end = _sv_find_begin_end(body, else_start)
+            else_end_kw = body.rfind("end", else_start, else_end)
+            else_body = body[else_start:else_end_kw].strip()
+            block_end = _sv_find_generate_end(body, else_end)
+        else:
+            block_end = _sv_find_generate_end(body, if_end)
+
+        # Emit the appropriate branch
+        if cond_val:
+            result.append(if_body)
+        else:
+            result.append(else_body)
+
+        last = block_end
+
+    result.append(body[last:])
+    return "".join(result)
+
+
+def _sv_unroll_generate_case_blocks_once(
+    body: str, define_values: Optional[dict[str, int]] = None
+) -> str:
+    """
+    Single-pass unroll of generate-case blocks.
+
+    For each generate-case block, evaluate the expression. Pick the matching case arm,
+    or default if no match. If expression is unresolvable, preserve block verbatim.
+
+    Inputs:
+        body: Raw module body text
+        define_values: Resolved parameter/macro values for bound resolution (optional, defaults to {})
+
+    Outputs:
+        Transformed body string with one level of generate-case blocks unrolled.
+    """
+    if define_values is None:
+        define_values = {}
+
+    result = []
+    last = 0
+
+    for m in _RE_GENCASE.finditer(body):
+        if m.start() < last:
+            continue
+        result.append(body[last : m.start()])
+
+        expr = m.group(1).strip()
+
+        # Try to evaluate the case expression
+        expr_val = _sv_resolve_bound(expr, define_values)
+        if expr_val is None:
+            # Unresolvable; preserve block verbatim
+            block_end = _sv_find_generate_end(body, m.end())
+            result.append(body[m.start() : block_end])
+            last = block_end
+            continue
+
+        # Expression is resolvable; find and parse case items
+        case_start = m.end()
+        block_end = _sv_find_generate_end(body, case_start)
+
+        # Extract case body (between case(...) and endcase endgenerate)
+        endcase_pos = body.rfind("endcase", case_start, block_end)
+        if endcase_pos < 0:
+            endcase_pos = block_end
+        case_body = body[case_start:endcase_pos]
+
+        # Parse case items: look for "VAL: begin : label ... end" or "default: begin : label ... end"
+        picked_body = None
+        default_body = None
+
+        # Match individual case items
+        for item_match in re.finditer(r"(\d+|default)\s*:\s*begin\s*(?::(\w+))?", case_body):
+            item_label = item_match.group(1)
+            item_start = item_match.end()
+            item_end = _sv_find_begin_end(case_body, item_start)
+            item_end_kw = case_body.rfind("end", item_start, item_end)
+            if item_end_kw < 0:
+                continue
+            item_body = case_body[item_start:item_end_kw].strip()
+
+            if item_label == "default":
+                default_body = item_body
+            else:
+                try:
+                    item_val = int(item_label)
+                    if item_val == expr_val:
+                        picked_body = item_body
+                except ValueError:
+                    pass
+
+        # Emit picked body or default
+        if picked_body is not None:
+            result.append(picked_body)
+        elif default_body is not None:
+            result.append(default_body)
+
+        last = block_end
+
+    result.append(body[last:])
+    return "".join(result)
+
+
+def _sv_find_generate_end(text: str, search_start: int) -> int:
+    """
+    Find the index past 'endgenerate' starting from search_start.
+
+    Looks for the closing 'endgenerate' keyword; returns position past it.
+    """
+    m = re.search(r"\bendgenerate\b", text[search_start:])
+    if m:
+        return search_start + m.end()
+    return len(text)
+
+
 def _sv_extract_alias_pairs(
     body: str,
     define_values: Optional[dict[str, int]],
@@ -682,13 +981,13 @@ def _sv_extract_alias_pairs(
 ) -> list:
     """Extract per-bit alias pairs from `assign LHS = RHS;` statements.
 
-    This function unrolls generate-for blocks in the body before extracting aliases,
+    This function unrolls all generate blocks (for, if, case) in the body before extracting aliases,
     so that alias pairs reflect concrete per-iteration indices (e.g. out[0]->in[0])
     rather than literal loop-variable forms (e.g. out[i]->in[i]).
     """
     if define_values is None:
         define_values = {}
-    body = _sv_unroll_generate_for_blocks(body, define_values)
+    body = _sv_unroll_generate_blocks_to_fixed_point(body, define_values)
     pairs = []
     for m in _RE_ASSIGN.finditer(body):
         lhs = m.group(1).strip()
@@ -770,7 +1069,9 @@ def _sv_extract_instances_flat(body: str, prefix: str = "") -> list:
             overrides = overrides_at[override_keys[i]]
         if cell in _PRIMITIVES:
             nets = [n.strip() for n in inner.split(",") if n.strip()]
-            pmap = {f"_p{i}": n for i, n in enumerate(nets)}
+            arity = len(nets)
+            pin_names = _primitive_pin_names(cell, arity)
+            pmap = {pin_names[i]: nets[i] for i in range(min(len(pin_names), len(nets)))}
             instances.append((inst, cell, pmap, overrides))
             continue
         if "." not in inner:
@@ -818,6 +1119,9 @@ def _sv_extract_instances(
             return str(sizes[sig]) if sig in sizes else m.group(0)
 
         body = _RE_DOLLAR_SIZE.sub(_repl_size, body)
+
+    # Unroll generate-if and generate-case blocks to fixed point
+    body = _sv_unroll_generate_blocks_to_fixed_point(body, define_values)
 
     # Find and expand generate-for loops
     for m in _RE_GENFOR.finditer(body):

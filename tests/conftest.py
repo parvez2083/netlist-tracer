@@ -66,6 +66,30 @@ def synthetic_nested_generate_v(fixtures_synthetic_dir):
 
 
 @pytest.fixture
+def synthetic_verilog_generate_if_v(fixtures_synthetic_dir):
+    """Path to synthetic verilog_generate_if.v fixture (generate if)."""
+    return os.path.join(fixtures_synthetic_dir, "verilog_generate_if.v")
+
+
+@pytest.fixture
+def synthetic_verilog_generate_case_v(fixtures_synthetic_dir):
+    """Path to synthetic verilog_generate_case.v fixture (generate case)."""
+    return os.path.join(fixtures_synthetic_dir, "verilog_generate_case.v")
+
+
+@pytest.fixture
+def synthetic_verilog_gate_primitives_v(fixtures_synthetic_dir):
+    """Path to synthetic verilog_gate_primitives.v fixture (gate primitives)."""
+    return os.path.join(fixtures_synthetic_dir, "verilog_gate_primitives.v")
+
+
+@pytest.fixture
+def synthetic_verilog_defparam_v(fixtures_synthetic_dir):
+    """Path to synthetic verilog_defparam.v fixture (defparam parameter override)."""
+    return os.path.join(fixtures_synthetic_dir, "verilog_defparam.v")
+
+
+@pytest.fixture
 def fixtures_vendored_dir():
     """Return path to vendored fixtures directory."""
     return os.path.join(os.path.dirname(__file__), "fixtures", "vendored")
