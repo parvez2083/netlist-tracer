@@ -40,8 +40,9 @@ def main() -> int:
         "-pin",
         action="append",
         default=None,
-        help="Pin name(s) to trace (BIT-LEVEL only, e.g. data[3]). "
-        "Comma-separated or repeated. Omit to trace all bit-level pins of cell.",
+        help="Pin name(s) to trace. Exact bit-level (e.g. data[3]) or bare bus base name "
+        "(e.g. data, expands to all data[0..N]). Comma-separated or repeated. "
+        "Omit to trace every bit-level pin of cell.",
     )
     parser.add_argument("-target", default=None, help="Target cell or instance name (optional)")
     parser.add_argument(
@@ -51,7 +52,7 @@ def main() -> int:
         "-defines", default=None, help="Comma-separated list of preprocessor defines"
     )
     parser.add_argument(
-        "--trace-format",
+        "-trace_format",
         choices=["text", "json"],
         default="text",
         help="Output format: text (default) or JSON",

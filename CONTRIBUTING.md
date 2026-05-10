@@ -29,7 +29,7 @@ PEP 660 editable installs require pip ≥ 21.3 (Oct 2021). The system `pip3.9` o
 pytest
 ```
 
-Expected output: **28 passed** (all tests pass in ~0.4 seconds).
+Expected output: **40 passed, 4 skipped** (skipped tests are env-var-gated local smoke tests; see below).
 
 ### Run fast tests only
 
@@ -87,7 +87,7 @@ ruff check .
 mypy src/
 ```
 
-Expected: **Success: no issues found in 13 source files**
+Expected: **Success: no issues found in 19 source files**
 
 The configuration enforces `--strict` on public API modules. The SystemVerilog elaboration helpers (`parsers/verilog/*`) have a permissive carve-out to allow dynamic argument handling.
 

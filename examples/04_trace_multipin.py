@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Example: Tracing multiple pins at once using the trace_pins method.
 
-This example demonstrates the Strict Bit-Level semantics of netlist-tracer:
-pin tracing operates ONLY on bit-level pin names (e.g., data[0], data[1]).
-Bare bus names (e.g., 'data') are NOT expanded automatically.
+trace_pins() accepts pin names in three forms:
+  1. Exact bit-level (e.g., "data[3]") — traces that single pin.
+  2. Bare bus base name (e.g., "data") — auto-expands to all indexed
+     members "data[0]", "data[1]", ..., "data[N]".
+  3. pins=None (omit-mode) — traces every bit-level pin in the cell.
 
-Note: For v0.1, bus-name expansion is not supported. To trace multiple bits
-of a bus, either specify each bit explicitly or use omit-mode (pins=None)
-to trace all bit-level pins of the cell.
+Each result key in the returned dict is a single bit-level pin name; bus
+expansions produce one key per bit, equivalent to passing the bits as a
+comma-separated list.
 """
 
 from netlist_tracer import BidirectionalTracer, NetlistParser
@@ -52,16 +54,17 @@ def main():
         print(f"  ... and {len(all_results) - 5} more pins")
 
     print("\n" + "=" * 70)
-    print("Example 3: Demonstrating Strict Bit-Level semantics")
+    print("Example 3: Bare bus name auto-expands to all indexed members")
     print("=" * 70)
 
-    # Get list of all bit-level pins (these are the only valid ones)
-    subckt = parser.subckts.get("picorv32")
-    if subckt:
-        print(f"\nValid bit-level pins in picorv32: {subckt.pins[:10]}...")
-        print("\nNote: These are the ONLY pin names you can use with trace_pins().")
-        print("Bare bus names (if they exist) would require specifying each bit,")
-        print("e.g., '-pin data[0],data[1],data[2]' not '-pin data'.")
+    # picorv32 has mem_addr[0]..mem_addr[31] as 32 bit-level pins.
+    # Passing the bare bus base name 'mem_addr' expands to all 32 bits.
+    bus_results = tracer.trace_pins("picorv32", pins=["mem_addr"])
+    print(f"\ntrace_pins('picorv32', pins=['mem_addr']) returned {len(bus_results)} keys")
+    print(f"  First 3 keys: {sorted(bus_results.keys())[:3]}")
+    print(f"  Last  3 keys: {sorted(bus_results.keys())[-3:]}")
+    print("\nThis is equivalent to passing the comma-separated bit list:")
+    print("  pins=['mem_addr[0]', 'mem_addr[1]', ..., 'mem_addr[31]']")
 
 
 if __name__ == "__main__":

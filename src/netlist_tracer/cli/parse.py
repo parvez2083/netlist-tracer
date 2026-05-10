@@ -27,16 +27,16 @@ def main() -> int:
     user_defines = set(args.defines.split(",")) if args.defines else None
 
     if not os.path.isfile(args.netlist) and not os.path.isdir(args.netlist):
-        print(f"ERROR: Netlist file or directory not found: {args.netlist}")
+        print(f"ERROR: Netlist file or directory not found: {args.netlist}", file=sys.stderr)
         return 1
 
     try:
         nl_parser = NetlistParser(args.netlist, defines=user_defines, top=args.top)
     except NetlistParseError as e:
-        print(f"ERROR: {e}")
+        print(f"ERROR: {e}", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"ERROR: Failed to parse netlist: {e}")
+        print(f"ERROR: Failed to parse netlist: {e}", file=sys.stderr)
         return 1
 
     print(f"Format: {nl_parser.format}")
@@ -48,7 +48,7 @@ def main() -> int:
         nl_parser.dump_json(args.output)
         return 0
     except Exception as e:
-        print(f"ERROR: Failed to write output: {e}")
+        print(f"ERROR: Failed to write output: {e}", file=sys.stderr)
         return 1
 
 

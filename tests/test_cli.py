@@ -70,7 +70,7 @@ def test_cli_multipin_sectioned() -> None:
 
 
 def test_cli_trace_format_json() -> None:
-    """Verify --trace-format json produces valid JSON output."""
+    """Verify -trace_format json produces valid JSON output."""
     repo_root = Path(__file__).parent.parent
     netlist_path = repo_root / "tests/fixtures/vendored/picorv32.v"
 
@@ -82,7 +82,7 @@ def test_cli_trace_format_json() -> None:
             str(netlist_path),
             "-cell",
             "picorv32",
-            "--trace-format",
+            "-trace_format",
             "json",
         ],
         capture_output=True,

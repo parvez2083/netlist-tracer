@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Optional, cast
@@ -184,7 +185,7 @@ class BidirectionalTracer:
         """
         start_matches = self.resolve_name(start_name)
         if not start_matches:
-            print(f"ERROR: '{start_name}' not found as cell type or instance name")
+            print(f"ERROR: '{start_name}' not found as cell type or instance name", file=sys.stderr)
             return []
 
         if max_depth is None and re.match(r"^(VDD|VSS)", start_pin):
@@ -194,7 +195,10 @@ class BidirectionalTracer:
         if target_name:
             target_matches = self.resolve_name(target_name)
             if not target_matches:
-                print(f"ERROR: '{target_name}' not found as cell type or instance name")
+                print(
+                    f"ERROR: '{target_name}' not found as cell type or instance name",
+                    file=sys.stderr,
+                )
                 return []
             for cell_type, inst_chain in target_matches:
                 leaf_ctx = inst_chain[-1] if inst_chain else None
@@ -204,17 +208,18 @@ class BidirectionalTracer:
         for start_cell, start_inst_chain in start_matches:
             subckt = self.parser.subckts.get(start_cell)
             if not subckt or start_pin not in subckt.pin_to_pos:
-                print(f"ERROR: Pin '{start_pin}' not found in cell '{start_cell}'")
+                print(f"ERROR: Pin '{start_pin}' not found in cell '{start_cell}'", file=sys.stderr)
                 if subckt:
                     import difflib
 
                     def base(p: str) -> str:
                         return re.sub(r"\[\d+\]$", "", p)
 
-                    # If input matches the base of one or more indexed pins
-                    # (bare bus name attempt — not supported per Strict
-                    # Bit-Level), suggest the actual indexed pins instead of
-                    # echoing the same base name back.
+                    # NOTE: trace_pins() expands bare bus names via
+                    # expand_pin() before reaching this point. This branch
+                    # only fires when trace() is called directly (library
+                    # API) with a bus-base name. In that case, suggest the
+                    # actual indexed members rather than echoing the base.
                     bus_members = [
                         p
                         for p in subckt.pins
@@ -420,13 +425,13 @@ class BidirectionalTracer:
         # Resolve start_name to cell_type
         start_matches = self.resolve_name(start_name)
         if not start_matches:
-            print(f"ERROR: '{start_name}' not found as cell type or instance name")
+            print(f"ERROR: '{start_name}' not found as cell type or instance name", file=sys.stderr)
             return {}
 
         start_cell = start_matches[0][0]
         subckt = self.parser.subckts.get(start_cell)
         if not subckt:
-            print(f"ERROR: Cell '{start_cell}' has no subcircuit definition")
+            print(f"ERROR: Cell '{start_cell}' has no subcircuit definition", file=sys.stderr)
             return {}
 
         # Determine pins to trace

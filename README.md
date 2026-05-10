@@ -79,7 +79,7 @@ Notation:
 ### `netlist-tracer` — hierarchical signal tracing
 
 ```
-netlist-tracer -netlist <file|dir> -cell <cell> [-pin <pin>] [-target <cell>] [-max_depth <n>] [--trace-format <fmt>] [-defines <csv>]
+netlist-tracer -netlist <file|dir> -cell <cell> [-pin <pin>] [-target <cell>] [-max_depth <n>] [-trace_format <fmt>] [-defines <csv>]
 ```
 
 | Option | Description |
@@ -89,7 +89,7 @@ netlist-tracer -netlist <file|dir> -cell <cell> [-pin <pin>] [-target <cell>] [-
 | `-pin` | Pin name(s), BIT-LEVEL form (e.g. `data[3]`). Comma-separated or repeated flag. Omit to trace all bit-level pins of cell. |
 | `-target` | Optional target cell (traces to all endpoints if omitted) |
 | `-max_depth` | Limit path depth (useful for supply nets) |
-| `--trace-format` | Output format: `text` (default) or `json` |
+| `-trace_format` | Output format: `text` (default) or `json` |
 | `-defines` | Comma-separated preprocessor defines (Verilog/SV only) |
 
 ### `netlist-parser` — build and cache JSON
@@ -117,7 +117,8 @@ Trace signals bidirectionally through the hierarchy.
 
 **Methods:**
 - `trace(start_name, start_pin, target_name=None, max_depth=None)` — return list of `TraceStep` paths
-- `trace_pins(start_name, pins=None, target_name=None, max_depth=None)` — trace multiple pins at once; returns dict mapping `pin_name -> [paths]`. If `pins=None`, traces all bit-level pins in the cell (Strict Bit-Level semantics).
+- `trace_pins(start_name, pins=None, target_name=None, max_depth=None)` — trace multiple pins at once; returns dict mapping `pin_name -> [paths]`. If `pins=None`, traces all bit-level pins in the cell. Bare bus base names in `pins` (e.g. `'data'` when `data[0..N]` exist) auto-expand to all indexed members.
+- `expand_pin(subckt, name)` — helper that returns `[name]` if `name` is an exact pin, all bit-level members if `name` is a bare bus base, or `[]` if unknown. Used internally by `trace_pins` for bus expansion.
 - `resolve_name(name)` — resolve cell/instance name to `(cell_type, inst_chain)` tuples
 
 ### `TraceStep`
