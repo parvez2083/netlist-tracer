@@ -90,6 +90,34 @@ class TestIncludeSupport:
             assert "PARENT" in parser.subckts
             assert "CHILD" in parser.subckts
 
+    def test_include_env_var_expansion(self, monkeypatch) -> None:
+        """`.include` with `$VAR/...` form resolves via os.path.expandvars.
+
+        v0.3.1 added environment variable expansion to _resolve_include_path so
+        PDK-style paths like `.include '$PDK_ROOT/models.lib'` resolve at parse
+        time using the current process environment.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            child_dir = os.path.join(tmpdir, "child_dir")
+            os.makedirs(child_dir)
+            child_file = os.path.join(child_dir, "child.sp")
+            with open(child_file, "w") as f:
+                f.write(".subckt CHILD a b\n")
+                f.write("R1 a b 1k\n")
+                f.write(".ends CHILD\n")
+
+            parent_file = os.path.join(tmpdir, "parent.sp")
+            with open(parent_file, "w") as f:
+                f.write(".include '$NETTRACE_TEST_DIR/child.sp'\n")
+                f.write(".subckt TOP a b\n")
+                f.write("X1 a b CHILD\n")
+                f.write(".ends TOP\n")
+
+            monkeypatch.setenv("NETTRACE_TEST_DIR", child_dir)
+            parser = NetlistParser(parent_file)
+            assert "TOP" in parser.subckts
+            assert "CHILD" in parser.subckts, "Env-var-expanded include path should have resolved"
+
     def test_include_unresolvable_raises(self) -> None:
         """Parent.sp includes non-existent file. Must raise NetlistParseError."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -229,34 +257,99 @@ class TestIncludeSupport:
             error_msg = str(exc_info.value)
             assert "cycle" in error_msg.lower()
 
-    def test_lib_directive_named_section_skipped(self, caplog) -> None:
-        """`.lib path libname` (named-section form) is skipped entirely with a warning.
+    def test_lib_directive_named_section_resolvable_inlines(self, caplog) -> None:
+        """`.lib path SECTION` resolves and emits ONLY the matched section (v0.3.1).
 
-        Lib-section semantics aren't supported; the file at `path` is NOT included.
-        Parsing of the rest of the parent file proceeds normally.
+        v0.3.1 (J): section-aware loading. The resolver scans the inlined file
+        for `.lib SECTION ... .endl SECTION` markers and emits only the lines
+        between them. Other sections in the file are ignored.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Multi-section .lib: TT corner has Q_TT, FF corner has Q_FF.
+            lib_file = os.path.join(tmpdir, "transistor_lib.lib")
+            with open(lib_file, "w") as f:
+                f.write(".lib TT_CORNER\n")
+                f.write(".subckt Q_TT c b e\n")
+                f.write("Q1 c b e transistor_model\n")
+                f.write(".ends Q_TT\n")
+                f.write(".endl TT_CORNER\n")
+                f.write(".lib FF_CORNER\n")
+                f.write(".subckt Q_FF c b e\n")
+                f.write("Q1 c b e transistor_model\n")
+                f.write(".ends Q_FF\n")
+                f.write(".endl FF_CORNER\n")
+
+            parent_file = os.path.join(tmpdir, "parent.sp")
+            with open(parent_file, "w") as f:
+                f.write(".lib 'transistor_lib.lib' TT_CORNER\n")
+                f.write(".subckt TOP a b c\n")
+                f.write("X1 a b c Q_TT\n")
+                f.write(".ends TOP\n")
+
+            parser = NetlistParser(parent_file)
+            assert "TOP" in parser.subckts
+            assert "Q_TT" in parser.subckts, (
+                "Requested section TT_CORNER's content should be emitted"
+            )
+            assert "Q_FF" not in parser.subckts, (
+                "Non-requested section FF_CORNER's content must NOT be emitted (v0.3.1)"
+            )
+
+    def test_lib_directive_named_section_section_not_found(self, caplog) -> None:
+        """.lib path SECTION resolves but SECTION absent in file -> WARN + skip (v0.3.1).
+
+        v0.3.1 (J): when the path resolves but the requested section name is
+        not found inside the file, the include is skipped with a warning so
+        the parent parse can continue.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             lib_file = os.path.join(tmpdir, "transistor_lib.lib")
             with open(lib_file, "w") as f:
-                f.write(".subckt Q_NPNX c b e\n")
+                f.write(".lib TT_CORNER\n")
+                f.write(".subckt Q_TT c b e\n")
                 f.write("Q1 c b e transistor_model\n")
-                f.write(".ends Q_NPNX\n")
+                f.write(".ends Q_TT\n")
+                f.write(".endl TT_CORNER\n")
 
             parent_file = os.path.join(tmpdir, "parent.sp")
             with open(parent_file, "w") as f:
-                f.write(".lib 'transistor_lib.lib' LIB_SECTION\n")
+                f.write(".lib 'transistor_lib.lib' NONEXISTENT_SECTION\n")
                 f.write(".subckt TOP a b c\n")
-                f.write("X1 a b c Q_NPNX\n")
+                f.write("R1 a b 1k\n")
+                f.write(".ends TOP\n")
+
+            with caplog.at_level("WARNING"):
+                parser = NetlistParser(parent_file)
+            assert "TOP" in parser.subckts, (
+                "Parent must remain visible after section-not-found WARN+skip"
+            )
+            assert "Q_TT" not in parser.subckts, (
+                "Section not requested -> nothing should be emitted"
+            )
+            assert any("section not found" in r.message.lower() for r in caplog.records), (
+                f"Expected 'section not found' warning; got: {[r.message for r in caplog.records]}"
+            )
+
+    def test_lib_directive_named_section_unresolvable(self, caplog) -> None:
+        """.lib path section with unresolvable path -> WARNING + skip, no raise."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            parent_file = os.path.join(tmpdir, "parent.sp")
+            missing_path = os.path.join(tmpdir, "definitely_missing.lib")
+            with open(parent_file, "w") as f:
+                f.write(f".lib '{missing_path}' SOME_SECTION\n")
+                f.write(".subckt TOP a b c\n")
+                f.write("R1 a b 1k\n")
                 f.write(".ends TOP\n")
 
             with caplog.at_level("WARNING"):
                 parser = NetlistParser(parent_file)
             assert "TOP" in parser.subckts
-            assert "Q_NPNX" not in parser.subckts
-            assert any("lib-section semantics unsupported" in r.message for r in caplog.records)
+            assert any("unresolvable" in r.message.lower() for r in caplog.records), (
+                f"Expected unresolvable warning; got: {[r.message for r in caplog.records]}"
+            )
 
     def test_lib_directive_bare_include(self) -> None:
-        """`.lib path` (no libname) inlines the entire file like `.include`."""
+        """`.lib path` (no section) inlines the entire file like `.include`."""
         with tempfile.TemporaryDirectory() as tmpdir:
             lib_file = os.path.join(tmpdir, "transistor_lib.lib")
             with open(lib_file, "w") as f:
@@ -274,6 +367,54 @@ class TestIncludeSupport:
             parser = NetlistParser(parent_file)
             assert "TOP" in parser.subckts
             assert "Q_NPNX" in parser.subckts
+
+    def test_lib_directive_bare_unresolvable(self, caplog) -> None:
+        """Bare `.lib path` with unresolvable path -> WARNING + skip, no raise (v0.3.1).
+
+        HSPICE files commonly contain intra-file `.lib SECTION_NAME` markers
+        that open a section block. These are syntactically identical to a
+        bare-form .lib path include directive. v0.3.1 extends the
+        try-and-degrade pattern (already used for `.lib path section`) to
+        the bare form so the parser doesn't abort on these markers.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            parent_file = os.path.join(tmpdir, "parent.sp")
+            # 'tt_allDevices_post' is a typical HSPICE intra-file section
+            # marker name; with no resolvable file, it should warn+skip.
+            with open(parent_file, "w") as f:
+                f.write(".lib tt_allDevices_post\n")
+                f.write(".subckt TOP a b c\n")
+                f.write("R1 a b 1k\n")
+                f.write(".ends TOP\n")
+
+            with caplog.at_level("WARNING"):
+                parser = NetlistParser(parent_file)
+            assert "TOP" in parser.subckts, (
+                "Parent subckt must remain visible after bare .lib WARN+skip"
+            )
+            assert any("unresolvable" in r.message.lower() for r in caplog.records), (
+                f"Expected unresolvable warning; got: {[r.message for r in caplog.records]}"
+            )
+
+    def test_include_directive_unresolvable_still_raises(self) -> None:
+        """`.include` (NOT `.lib`) with unresolvable path STILL raises (v0.3.1).
+
+        Confirms that v0.3.1's try-and-degrade scope is intentionally limited
+        to `.lib` (best-effort PDK overlay) and does NOT extend to `.include`
+        / `.inc` (explicit dependencies). This is the inverse-direction
+        regression for deliverable H.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            parent_file = os.path.join(tmpdir, "parent.sp")
+            missing_path = os.path.join(tmpdir, "definitely_missing.sp")
+            with open(parent_file, "w") as f:
+                f.write(f".include '{missing_path}'\n")
+                f.write(".subckt TOP a b c\n")
+                f.write("R1 a b 1k\n")
+                f.write(".ends TOP\n")
+
+            with pytest.raises(NetlistParseError, match="Include path not found"):
+                NetlistParser(parent_file)
 
     def test_spectre_include(self) -> None:
         """Spectre include directive: `include "child.scs"` expands child subckt."""
@@ -329,3 +470,140 @@ class TestIncludeSupport:
             assert ".ends bar" in expanded_text, (
                 "Expanded content should include complete subckt definition"
             )
+
+    def test_spectre_include_section_resolvable_inlines(self, caplog) -> None:
+        """Spectre `include "path" section=NAME` emits only the matched library (v0.3.1).
+
+        v0.3.1 (J): Spectre section-aware loading scans the inlined file for
+        `library NAME ... endlibrary NAME` markers and emits only the lines
+        between them.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            child_file = os.path.join(tmpdir, "child.scs")
+            with open(child_file, "w") as f:
+                f.write("library SSG_PRE\n")
+                f.write("subckt foo a b\n")
+                f.write("  r1 a b resistor r=1k\n")
+                f.write("ends foo\n")
+                f.write("endlibrary SSG_PRE\n")
+                f.write("library FFG_PRE\n")
+                f.write("subckt bar a b\n")
+                f.write("  r1 a b resistor r=2k\n")
+                f.write("ends bar\n")
+                f.write("endlibrary FFG_PRE\n")
+
+            parent_file = os.path.join(tmpdir, "parent.scs")
+            with open(parent_file, "w") as f:
+                f.write('include "child.scs" section=SSG_PRE\n')
+                f.write("subckt top x y\n")
+                f.write("  x1 x y foo\n")
+                f.write("ends top\n")
+
+            parser = NetlistParser(parent_file)
+            assert "top" in parser.subckts
+            assert "foo" in parser.subckts, (
+                "Requested library SSG_PRE's content should be emitted (v0.3.1)"
+            )
+            assert "bar" not in parser.subckts, (
+                "Non-requested library FFG_PRE's content must NOT be emitted"
+            )
+
+    def test_spectre_include_section_unresolvable(self, monkeypatch, caplog) -> None:
+        """Spectre `include "path" section=NAME` with unresolvable path -> WARNING + skip, no raise."""
+        # Ensure the env var is NOT set in case the host shell has it.
+        monkeypatch.delenv("NETTRACE_TEST_NONEXISTENT_VAR", raising=False)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            parent_file = os.path.join(tmpdir, "parent.scs")
+            with open(parent_file, "w") as f:
+                f.write('include "$NETTRACE_TEST_NONEXISTENT_VAR/missing.slib" section=foo\n')
+                f.write("subckt top x y\n")
+                f.write("  r1 x y resistor r=1k\n")
+                f.write("ends top\n")
+
+            with caplog.at_level("WARNING"):
+                parser = NetlistParser(parent_file)
+            assert "top" in parser.subckts
+            assert any("unresolvable" in r.message.lower() for r in caplog.records), (
+                f"Expected unresolvable warning; got: {[r.message for r in caplog.records]}"
+            )
+
+    def test_lib_directive_same_file_two_sections_no_false_cycle(self) -> None:
+        """L fix: .lib path SECTION_A and .lib path SECTION_B from same file must NOT trigger false cycle.
+
+        v0.3.1 (L): cycle detection now keys on (path, section_filter) tuple, not just path.
+        Two `.lib path SECTION_A` and `.lib path SECTION_B` calls into the same file are
+        distinct logical include units and do not form a cycle.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Multi-section .lib: two corners with different subckts
+            lib_file = os.path.join(tmpdir, "multi_corner.lib")
+            with open(lib_file, "w") as f:
+                f.write(".lib CORNER_FF\n")
+                f.write(".subckt Q_FF c b e\n")
+                f.write("Q1 c b e nmos_ff\n")
+                f.write(".ends Q_FF\n")
+                f.write(".endl CORNER_FF\n")
+                f.write(".lib CORNER_SS\n")
+                f.write(".subckt Q_SS c b e\n")
+                f.write("Q1 c b e nmos_ss\n")
+                f.write(".ends Q_SS\n")
+                f.write(".endl CORNER_SS\n")
+
+            parent_file = os.path.join(tmpdir, "parent.sp")
+            with open(parent_file, "w") as f:
+                # Include same file with different sections
+                f.write(".lib 'multi_corner.lib' CORNER_FF\n")
+                f.write(".lib 'multi_corner.lib' CORNER_SS\n")
+                f.write(".subckt TOP a b c\n")
+                f.write("X1 a b c Q_FF\n")
+                f.write("X2 a b c Q_SS\n")
+                f.write(".ends TOP\n")
+
+            # This must parse successfully (no false cycle error)
+            parser = NetlistParser(parent_file)
+            assert "TOP" in parser.subckts
+            assert "Q_FF" in parser.subckts
+            assert "Q_SS" in parser.subckts
+
+    def test_lib_directive_cycle_inside_file_hard_failure(self) -> None:
+        """M fix: real cycle inside .lib file must propagate and exit 1, not degrade to WARNING.
+
+        v0.3.1 (M): try-and-degrade now discriminates exception types. Only
+        IncludePathNotFoundError (unresolvable paths) triggers degradation.
+        Cycle-detection errors raise NetlistParseError and propagate, causing
+        CLI exit code 1.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a cycle: a.lib includes b.lib, b.lib includes a.lib
+            a_lib = os.path.join(tmpdir, "a.lib")
+            b_lib = os.path.join(tmpdir, "b.lib")
+
+            with open(a_lib, "w") as f:
+                f.write(".lib CORNER_A\n")
+                f.write(".subckt QA c b e\n")
+                f.write("Q1 c b e nmos\n")
+                f.write(".ends QA\n")
+                f.write(f".include '{b_lib}'\n")
+                f.write(".endl CORNER_A\n")
+
+            with open(b_lib, "w") as f:
+                f.write(".lib CORNER_B\n")
+                f.write(".subckt QB c b e\n")
+                f.write("Q1 c b e nmos\n")
+                f.write(".ends QB\n")
+                f.write(f".include '{a_lib}'\n")
+                f.write(".endl CORNER_B\n")
+
+            parent_file = os.path.join(tmpdir, "parent.sp")
+            with open(parent_file, "w") as f:
+                f.write(f".include '{a_lib}'\n")
+                f.write(".subckt TOP a b c\n")
+                f.write("X1 a b c QA\n")
+                f.write(".ends TOP\n")
+
+            # This must raise NetlistParseError (cycle detection), not degrade to warning
+            with pytest.raises(NetlistParseError) as exc_info:
+                NetlistParser(parent_file)
+
+            error_msg = str(exc_info.value)
+            assert "cycle" in error_msg.lower()

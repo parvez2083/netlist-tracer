@@ -7,7 +7,7 @@ import re
 from typing import Optional, Union
 
 from netlist_tracer._logging import get_logger
-from netlist_tracer.exceptions import NetlistParseError
+from netlist_tracer.exceptions import IncludePathNotFoundError, NetlistParseError
 
 _logger = get_logger(__name__)
 
@@ -33,21 +33,68 @@ def expand_includes(
         include_paths = []
 
     expanded_lines: list[tuple[str, str, int]] = []
-    include_stack: list[str] = []
+    # Stack entries are (abs_path, section_filter) tuples. section_filter is either None
+    # (whole-file include) or (kind, section_name) tuple. Cycle detection compares the
+    # full tuple, so same file with different sections is NOT a cycle.
+    include_stack: list[tuple[str, Optional[tuple[str, str]]]] = []
 
     def _expand_recursive(
-        filename: str, include_stack: list[str], current_lang: str = "spice"
-    ) -> None:
-        """Recursively expand a file, tracking include stack for cycle detection."""
-        abs_path = os.path.abspath(filename)
+        filename: str,
+        include_stack: list[tuple[str, Optional[tuple[str, str]]]],
+        current_lang: str = "spice",
+        section_filter: Optional[tuple[str, str]] = None,
+    ) -> bool:
+        """Recursively expand a file, tracking include stack for cycle detection.
 
-        if abs_path in include_stack:
-            chain_str = " -> ".join(include_stack + [abs_path])
+        Args:
+            filename: Absolute path to the file to expand.
+            include_stack: List of (abs_path, section_filter) tuples representing
+                the current include chain. section_filter is None for whole-file
+                includes or (kind, section_name) tuple for section-aware loading.
+                Cycle detection compares the full (path, section_filter) tuple,
+                so the same file with different sections is NOT a cycle.
+            current_lang: 'spice' or 'spectre' (for language mode tracking).
+            section_filter: Optional (kind, section_name) tuple for section-aware loading.
+                When None, emit all lines (current behavior).
+                When ('spice', section_name), scan for .lib SECTION ... .endl [SECTION] markers
+                and emit only lines between them.
+                When ('spectre', section_name), scan for library NAME ... endlibrary [NAME] markers
+                and emit only lines between them.
+
+        Returns:
+            bool: True if section_filter is None (always-emit mode) or the requested section
+            was found and emitted. False if section_filter was set but the section name was
+            not found in the file. This allows the caller to emit a 'section not found' WARNING.
+
+        Known Limitation:
+            Nested section blocks (a section opener inside another section's block) are
+            handled via a flat-scan state machine that logs INFO when a nested opener is
+            detected. This may emit inner-section content as part of the outer section in
+            rare edge cases; proper depth tracking is deferred to v0.3.2. For v0.3.1,
+            nested sections are uncommon in PDK .lib files.
+        """
+        abs_path = os.path.abspath(filename)
+        cycle_key = (abs_path, section_filter)
+
+        if cycle_key in include_stack:
+            # Format the chain for readable error message
+            chain_strs = []
+            for stk_path, stk_sect in include_stack:
+                if stk_sect:
+                    chain_strs.append(f"{stk_path}[section={stk_sect[1]}]")
+                else:
+                    chain_strs.append(stk_path)
+            # Add current cycle point
+            if section_filter:
+                chain_strs.append(f"{abs_path}[section={section_filter[1]}]")
+            else:
+                chain_strs.append(abs_path)
+            chain_str = " -> ".join(chain_strs)
             raise NetlistParseError(
                 f"Include cycle detected: {chain_str} (cycle closes at {abs_path})"
             )
 
-        include_stack.append(abs_path)
+        include_stack.append(cycle_key)
 
         try:
             with open(abs_path) as f:
@@ -55,11 +102,69 @@ def expand_includes(
         except FileNotFoundError as e:
             raise NetlistParseError(f"Include file not found: {abs_path}") from e
 
+        # Section-aware loading state machine
+        emitting = True  # default: always emit
+        section_found = True  # default: pretend section was found (for return value)
+        if section_filter is not None:
+            emitting = False
+            section_found = False
+
         line_no = 1
         i = 0
         while i < len(lines):
             line = lines[i]
             stripped = line.strip()
+
+            # Section marker scanning (when section_filter is active)
+            if section_filter is not None:
+                kind, requested_name = section_filter
+                if kind == "spice":
+                    # Match .lib SECTION_NAME (opener)
+                    opener = re.match(r"^\.lib\s+(\S+)\s*$", stripped, re.IGNORECASE)
+                    # Match .endl [SECTION_NAME] (closer)
+                    closer = re.match(r"^\.endl\b(?:\s+(\S+))?\s*$", stripped, re.IGNORECASE)
+                else:  # spectre
+                    # Match library NAME (opener, case-sensitive)
+                    opener = re.match(r"^library\s+(\S+)\s*$", stripped)
+                    # Match endlibrary [NAME] (closer, case-sensitive)
+                    closer = re.match(r"^endlibrary\b(?:\s+(\S+))?\s*$", stripped)
+
+                if opener:
+                    opener_name = opener.group(1)
+                    if not emitting and opener_name == requested_name:
+                        # Start of requested section — skip the opener line itself
+                        emitting = True
+                        section_found = True
+                        line_no += 1
+                        i += 1
+                        continue
+                    elif emitting:
+                        # Nested section opener while already emitting — log and continue
+                        _logger.info(
+                            f"Nested or duplicate section opener '{opener_name}' "
+                            f"inside '{requested_name}'; flat-scan, ignoring"
+                        )
+                        line_no += 1
+                        i += 1
+                        continue
+                    else:
+                        # Different section, skip
+                        line_no += 1
+                        i += 1
+                        continue
+
+                if closer and emitting:
+                    # End of current section — skip the closer line itself
+                    emitting = False
+                    line_no += 1
+                    i += 1
+                    continue
+
+                if not emitting:
+                    # Outside requested section, skip this line entirely
+                    line_no += 1
+                    i += 1
+                    continue
 
             # Track language mode for Spectre
             if dialect == "spectre" and stripped.startswith("simulator lang="):
@@ -77,29 +182,93 @@ def expand_includes(
 
             if include_info:
                 raw_path: str
+                section: str = ""
+                directive_label: str  # '.lib' or '.include'/'.inc' or 'include' for log text
+                is_lib_directive: bool = (
+                    False  # True only for SPICE .lib (both bare and named-section)
+                )
                 if dialect == "spice" or (dialect == "spectre" and current_lang == "spice"):
+                    # SPICE directives: include_info is tuple for .lib, string for .include/.inc
                     if isinstance(include_info, tuple):
-                        raw_path, libname = include_info
-                        if libname:
-                            _logger.warning(
-                                f"Skipping .lib '{raw_path}' libname '{libname}' at "
-                                f"{abs_path}:{line_no} — lib-section semantics unsupported"
-                            )
-                            line_no += 1
-                            i += 1
-                            continue
+                        directive_label = ".lib"
+                        is_lib_directive = True  # All SPICE .lib forms use try-and-degrade
+                        raw_path, section = include_info
                     else:
+                        # .include or .inc — strict behavior
+                        directive_label = ".include"
+                        is_lib_directive = False
                         raw_path = include_info
                 else:
-                    raw_path = include_info  # type: ignore[assignment]
+                    # Pure Spectre: include_info is always (path, section) tuple after G1.
+                    directive_label = "include"
+                    is_lib_directive = False  # Spectre include stays strict
+                    assert isinstance(include_info, tuple)
+                    raw_path, section = include_info
 
-                try:
-                    resolved_path = _resolve_include_path(raw_path, abs_path, include_paths)
-                except NetlistParseError:
-                    raise
+                if section:
+                    # Try-and-degrade with section-aware loading: attempt to resolve and
+                    # inline, scanning only the requested section block. If the path can't
+                    # be resolved or the section name is not found, warn and skip rather
+                    # than raising — preserves parse progress on decks with
+                    # environment-dependent PDK paths. Applies to SPICE `.lib path section`
+                    # and Spectre `include "path" section=NAME`.
+                    # NOTE: Only IncludePathNotFoundError is swallowed here; other
+                    # NetlistParseError subclasses (e.g. cycle detection) propagate.
+                    try:
+                        resolved_path = _resolve_include_path(raw_path, abs_path, include_paths)
+                    except IncludePathNotFoundError:
+                        _logger.warning(
+                            f"Skipping {directive_label} '{raw_path}' (section '{section}') "
+                            f"— path unresolvable"
+                        )
+                        line_no += 1
+                        i += 1
+                        continue
+                    _logger.info(
+                        f"Inlining {directive_label} '{raw_path}' section '{section}' "
+                        f"-> {resolved_path}"
+                    )
+                    section_kind = "spice" if directive_label == ".lib" else "spectre"
+                    found = _expand_recursive(
+                        resolved_path,
+                        include_stack,
+                        current_lang,
+                        section_filter=(section_kind, section),
+                    )
+                    if not found:
+                        _logger.warning(
+                            f"Skipping {directive_label} '{raw_path}' (section '{section}') "
+                            f"— section not found in {resolved_path}"
+                        )
+                    line_no += 1
+                    i += 1
+                    continue
 
-                _logger.info(f"Including: {resolved_path} (from {abs_path}:{line_no})")
-                _expand_recursive(resolved_path, include_stack, current_lang)
+                # Bare include directive (no section name)
+                if is_lib_directive:
+                    # Bare .lib: try-and-degrade (warn+skip if unresolvable)
+                    # NOTE: Only IncludePathNotFoundError is swallowed here; other
+                    # NetlistParseError subclasses (e.g. cycle detection) propagate.
+                    try:
+                        resolved_path = _resolve_include_path(raw_path, abs_path, include_paths)
+                    except IncludePathNotFoundError:
+                        _logger.warning(
+                            f"Skipping {directive_label} '{raw_path}' — path unresolvable"
+                        )
+                        line_no += 1
+                        i += 1
+                        continue
+                    _logger.info(f"Including: {resolved_path}")
+                    _expand_recursive(resolved_path, include_stack, current_lang)
+                else:
+                    # .include/.inc (and Spectre bare include): strict raise on unresolvable
+                    try:
+                        resolved_path = _resolve_include_path(raw_path, abs_path, include_paths)
+                    except NetlistParseError:
+                        raise
+
+                    _logger.info(f"Including: {resolved_path}")
+                    _expand_recursive(resolved_path, include_stack, current_lang)
             else:
                 # Regular line — add to output with provenance
                 expanded_lines.append((line.rstrip("\n\r"), abs_path, line_no))
@@ -108,6 +277,7 @@ def expand_includes(
             i += 1
 
         include_stack.pop()
+        return section_found
 
     _expand_recursive(top_file, include_stack, current_lang=dialect)
     return expanded_lines
@@ -125,14 +295,21 @@ def _resolve_include_path(raw_path: str, including_file: str, include_paths: lis
         Absolute resolved path.
 
     Raises:
-        NetlistParseError: If path cannot be resolved.
+        IncludePathNotFoundError: If path cannot be resolved.
+            This is a subclass of NetlistParseError; try-and-degrade callers
+            catch IncludePathNotFoundError to allow graceful degradation.
     """
     # Guard against empty or whitespace-only paths
     if not raw_path or not raw_path.strip():
-        raise NetlistParseError(f"Empty include path at {including_file}")
+        raise IncludePathNotFoundError(f"Empty include path at {including_file}")
 
-    # Tilde expansion
-    expanded = os.path.expanduser(raw_path)
+    # Tilde and environment variable expansion. Env vars commonly appear
+    # in PDK paths (e.g. `.lib '$PDK_ROOT/models.lib' typ_section`). Unset
+    # vars are left as literal `$VAR` per os.path.expandvars semantics; the
+    # subsequent isfile checks will then fail and surface a normal
+    # "include path not found" error (which try-and-degrade callers
+    # downgrade to a WARNING).
+    expanded = os.path.expandvars(os.path.expanduser(raw_path))
 
     # Absolute path — use as-is
     if os.path.isabs(expanded):
@@ -140,7 +317,7 @@ def _resolve_include_path(raw_path: str, including_file: str, include_paths: lis
             return expanded
         else:
             search_list = [expanded]
-            raise NetlistParseError(
+            raise IncludePathNotFoundError(
                 f"Include path not found: {raw_path}\nSearched: {', '.join(search_list)}"
             )
 
@@ -158,19 +335,24 @@ def _resolve_include_path(raw_path: str, including_file: str, include_paths: lis
             return os.path.abspath(candidate)
         search_list_items.append(candidate)
 
-    raise NetlistParseError(
+    raise IncludePathNotFoundError(
         f"Include path not found: {raw_path}\nSearched: {', '.join(search_list_items)}"
     )
 
 
 def _parse_spice_include_directive(line: str) -> Optional[tuple[str, str] | str]:
-    """Match SPICE include directive. Return (path, libname) for .lib, path for .include/.inc.
+    """Match SPICE include directive. Return (path, section) for .lib, path for .include/.inc.
+
+    The third token of `.lib path token` is the section name selecting a
+    `.lib SECTION ... .endl SECTION` block within the resolved file. It is
+    NOT a library name. Section selection itself is not honored by the
+    parser (try-and-degrade inlines the whole file).
 
     Args:
         line: Stripped line text.
 
     Returns:
-        (path, libname) tuple for .lib, path string for .include/.inc, or None.
+        (path, section) tuple for .lib, path string for .include/.inc, or None.
     """
     # .include "path" or .include 'path' or .include path
     match = re.match(r"^\.include\s+['\"]?([^'\"]+)['\"]?\s*$", line, re.IGNORECASE)
@@ -184,14 +366,14 @@ def _parse_spice_include_directive(line: str) -> Optional[tuple[str, str] | str]
         path = match.group(1).strip()
         return path
 
-    # .lib "path" libname or .lib path libname
+    # .lib "path" section_name or .lib path section_name
     match = re.match(r"^\.lib\s+['\"]?([^'\"]+)['\"]?\s+(\S+)\s*$", line, re.IGNORECASE)
     if match:
         path = match.group(1).strip()
-        libname = match.group(2).strip()
-        return (path, libname)
+        section = match.group(2).strip()
+        return (path, section)
 
-    # .lib "path" (no libname — include entire file)
+    # .lib "path" (no section name — include entire file)
     match = re.match(r"^\.lib\s+['\"]?([^'\"]+)['\"]?\s*$", line, re.IGNORECASE)
     if match:
         path = match.group(1).strip()
@@ -200,18 +382,30 @@ def _parse_spice_include_directive(line: str) -> Optional[tuple[str, str] | str]
     return None
 
 
-def _parse_spectre_include_directive(line: str) -> Optional[str]:
-    """Match Spectre include directive. Return path or None.
+def _parse_spectre_include_directive(line: str) -> Optional[tuple[str, str]]:
+    """Match Spectre include directive. Return (path, section) or None.
+
+    Spectre supports a `section=NAME` keyword to select a named section from
+    a .scs/.slib file (analogous to SPICE `.lib path section_name`). When the
+    section keyword is absent, the second element of the returned tuple is an
+    empty string. Section selection itself is not honored by the parser
+    (try-and-degrade inlines the whole file).
 
     Args:
         line: Stripped line text (case-sensitive).
 
     Returns:
-        Path string or None.
+        (path, section) tuple where section is '' if no `section=` keyword,
+        or None if the line is not a Spectre include directive.
     """
-    # Spectre: include "path" (case-sensitive, quotes required per spec)
+    # Spectre: include "path" section=NAME (section= form)
+    match = re.match(r'^include\s+"([^"]+)"\s+section=(\S+)\s*$', line)
+    if match:
+        return (match.group(1), match.group(2))
+
+    # Spectre: include "path" (bare form, case-sensitive, quotes required per spec)
     match = re.match(r'^include\s+"([^"]+)"\s*$', line)
     if match:
-        return match.group(1)
+        return (match.group(1), "")
 
     return None

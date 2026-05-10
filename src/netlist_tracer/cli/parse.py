@@ -23,8 +23,8 @@ def main() -> int:
     parser.add_argument("-defines", default=None, help="Comma-separated preprocessor defines")
     parser.add_argument("-top", default=None, help="Top-level cell name (optional)")
     parser.add_argument(
-        "-I",
-        "--include-path",
+        "-include",
+        dest="include_path",
         action="append",
         default=None,
         help="Additional directory to search for include files (repeatable)",

@@ -242,8 +242,8 @@ def test_cli_edif_extension_edn() -> None:
                 os.unlink(tmp_path)
 
 
-def test_cli_include_path_flag() -> None:
-    """Verify -include_path flag resolves include files from specified directory."""
+def test_cli_include_flag() -> None:
+    """Verify -include flag resolves include files from specified directory."""
     import os
     import tempfile
 
@@ -275,7 +275,7 @@ def test_cli_include_path_flag() -> None:
                     str(parent_file),
                     "-output",
                     str(tmp_path),
-                    "-I",
+                    "-include",
                     str(tmpdir),
                 ],
                 capture_output=True,
@@ -294,8 +294,8 @@ def test_cli_include_path_flag() -> None:
                 os.unlink(tmp_path)
 
 
-def test_cli_include_path_flag_repeated() -> None:
-    """Verify -include_path flag can be repeated for multiple search directories."""
+def test_cli_include_flag_repeated() -> None:
+    """Verify -include flag can be repeated for multiple search directories."""
     import os
     import tempfile
 
@@ -337,9 +337,9 @@ def test_cli_include_path_flag_repeated() -> None:
                         str(parent_file),
                         "-output",
                         str(tmp_path),
-                        "-I",
+                        "-include",
                         str(tmpdir1),
-                        "-I",
+                        "-include",
                         str(tmpdir2),
                     ],
                     capture_output=True,
@@ -357,3 +357,100 @@ def test_cli_include_path_flag_repeated() -> None:
                     parent_file.unlink()
                 if os.path.exists(tmp_path):
                     os.unlink(tmp_path)
+
+
+def test_cli_trace_parse_error_returns_1() -> None:
+    """netlist-tracer must exit 1 when parse fails on an unresolvable .include (v0.3.1).
+
+    Regression for coordinator's live-validation observation that parse
+    errors must propagate to a non-zero CLI exit code. Uses `.include`
+    (strict semantics — raises) rather than `.lib` (try-and-degrade —
+    warns and continues).
+    """
+    import os as _os
+    import tempfile as _tf
+
+    with _tf.TemporaryDirectory() as tmpdir:
+        parent_file = _os.path.join(tmpdir, "parent.sp")
+        missing_path = _os.path.join(tmpdir, "definitely_missing.sp")
+        with open(parent_file, "w") as f:
+            f.write(f".include '{missing_path}'\n")
+            f.write(".subckt TOP a b c\n")
+            f.write("R1 a b 1k\n")
+            f.write(".ends TOP\n")
+
+        result = subprocess.run(
+            ["netlist-tracer", "-netlist", parent_file, "-cell", "TOP"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1, (
+            f"Expected exit 1 on parse error; got {result.returncode}. "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        # Some 'ERROR' diagnostic should appear in stdout or stderr.
+        combined = (result.stdout + result.stderr).lower()
+        assert "error" in combined, (
+            f"Expected ERROR diagnostic in output; got stdout={result.stdout!r} "
+            f"stderr={result.stderr!r}"
+        )
+
+
+def test_cli_parse_parse_error_returns_1() -> None:
+    """netlist-parser must exit 1 when parse fails on an unresolvable .include (v0.3.1)."""
+    import os as _os
+    import tempfile as _tf
+
+    with _tf.TemporaryDirectory() as tmpdir:
+        parent_file = _os.path.join(tmpdir, "parent.sp")
+        missing_path = _os.path.join(tmpdir, "definitely_missing.sp")
+        with open(parent_file, "w") as f:
+            f.write(f".include '{missing_path}'\n")
+            f.write(".subckt TOP a b c\n")
+            f.write("R1 a b 1k\n")
+            f.write(".ends TOP\n")
+        with _tf.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+            out_path = tmp.name
+        try:
+            result = subprocess.run(
+                ["netlist-parser", "-netlist", parent_file, "-output", out_path],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 1, (
+                f"Expected exit 1 on parse error; got {result.returncode}. "
+                f"stdout={result.stdout!r} stderr={result.stderr!r}"
+            )
+        finally:
+            if _os.path.exists(out_path):
+                _os.unlink(out_path)
+
+
+def test_cli_lib_unresolvable_returns_0_with_warning() -> None:
+    """Try-and-degrade WARN+skip on bare .lib path -> CLI must exit 0 (v0.3.1).
+
+    Confirms the inverse of the hard-error tests: deliverable H's WARN+skip
+    behavior is a successful parse with a warning, NOT a parse failure.
+    The CLI should produce a usable (if reduced) trace and exit 0.
+    """
+    import os as _os
+    import tempfile as _tf
+
+    with _tf.TemporaryDirectory() as tmpdir:
+        parent_file = _os.path.join(tmpdir, "parent.sp")
+        with open(parent_file, "w") as f:
+            # Bare-form .lib with unresolvable path triggers H's WARN+skip
+            f.write(".lib tt_allDevices_post\n")
+            f.write(".subckt TOP a b c\n")
+            f.write("R1 a b 1k\n")
+            f.write(".ends TOP\n")
+
+        result = subprocess.run(
+            ["netlist-tracer", "-netlist", parent_file, "-cell", "TOP"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"Expected exit 0 (WARN+skip is a success); got {result.returncode}. "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )

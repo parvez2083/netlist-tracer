@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-10
+
+### Added
+
+- Environment variable expansion in include path resolution: SPICE/Spectre include directives like `.include '$PDK_ROOT/models.lib'` or `include "$PDK_ROOT/..." section=NAME` now resolve via the current process environment (uses `os.path.expandvars`). Unset variables are left literal and produce the standard 'include path not found' error — which try-and-degrade callers downgrade to a WARNING.
+- Spectre `include "path" section=NAME` form recognition with section-aware emission: previously only the bare `include "path"` form was matched; lines with the `section=` keyword were silently ignored. The directive now resolves the path, scans the inlined file for matching `library NAME ... endlibrary NAME` markers, and emits only the matched range. Path unresolvable or section name absent → WARNING + skip without raising.
+
+### Changed
+
+- CLI flag rename: `-I` / `--include-path` is now `-include` (single-dash long-form, matching the rest of the CLI: `-cell`, `-pin`, `-netlist`, `-max_depth`, `-trace_format`, `-defines`). This is a breaking change with no alias; update scripts that used `-I` or `--include-path`.
+- `.lib path SECTION` and Spectre `include "path" section=NAME` are now SECTION-AWARE: the resolver scans the inlined file for matching `.lib SECTION ... .endl SECTION` (SPICE) or `library NAME ... endlibrary NAME` (Spectre) markers and emits only the lines between them. Path unresolvable → WARNING + skip. Section name absent in resolved file → WARNING + skip. Previously named-section `.lib` directives were always skipped with a warning, then briefly (v1.2 of this patch) inlined the whole file with the section name logged as ignored — both prior behaviors are superseded.
+- Bare `.lib path` (no section name) directives now also use try-and-degrade: unresolvable paths emit a WARNING and are skipped instead of raising. This prevents HSPICE intra-file `.lib SECTION_NAME` opener markers — which are syntactically identical to bare-form `.lib path` includes — from aborting parse when they slip past the section-aware scanner. `.include` and `.inc` directives keep their strict raise-on-unresolvable behavior.
+- Internal terminology: `libname` renamed to `section` in `parsers/includes.py` and in WARNING/INFO log message text. The third token of `.lib path token` is the section name selecting a `.lib SECTION ... .endl SECTION` block within the resolved file — not a library name. No public-API or behavioral change.
+
+### Fixed
+
+- Cycle detection no longer false-positives on multiple sections requested from the same library file. The cycle-detection stack now keys on `(path, section_filter)` tuples instead of path alone. Two `.lib path SECTION_A` and `.lib path SECTION_B` calls into the same file now correctly recognize that they are distinct logical include units and do not form a cycle.
+- `.lib` try-and-degrade error swallowing was too broad: cycle-detection errors and other hard parse failures were incorrectly caught and suppressed as WARNING+skip. v0.3.1 now discriminates exception types: only `IncludePathNotFoundError` (unresolvable paths) triggers degradation; cycle detection errors raise `NetlistParseError` and propagate, resulting in exit code 1. This restores the correct behavior of treating cycles as hard failures instead of recoverable missing-path issues.
+- CLI exit-code regression coverage: added subprocess-style tests that lock in `netlist-tracer` and `netlist-parser` returning exit code 1 on hard parse failures (e.g. `.include` with an unresolvable path) and exit code 0 on try-and-degrade WARN+skip outcomes. The CLI source already returned the correct exit codes; the tests guard against regression.
+- README CLI options table: removed inaccurate "or comma-separated" phrase from the include-path row. The flag accepts repeated invocations only (`-include /a -include /b`), not comma-separated lists.
+
 ## [0.3.0] - 2026-05-10
 
 ### Added

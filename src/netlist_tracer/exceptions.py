@@ -13,6 +13,16 @@ class NetlistParseError(NetlistError):
     pass
 
 
+class IncludePathNotFoundError(NetlistParseError):
+    """Raised when an include path cannot be resolved (subclass of NetlistParseError).
+
+    Used by try-and-degrade logic to distinguish unresolvable paths from other
+    parse errors (e.g. cycle detection, which must propagate).
+    """
+
+    pass
+
+
 class TraceError(NetlistError):
     """Reserved for future strict=True mode in the tracer.
 

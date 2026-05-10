@@ -7,17 +7,19 @@
 
 **Multi-format netlist parser and bidirectional hierarchical signal tracer**
 
-Parse and analyze semiconductor netlists across CDL, SPICE, Spectre, Verilog, and SystemVerilog formats with automatic format detection. Trace signals bidirectionally through the design hierarchy, resolving aliases and identifying connectivity paths.
+Parse and analyze semiconductor netlists across CDL, SPICE, Spectre, Verilog, SystemVerilog, and EDIF formats with automatic format detection. Trace signals bidirectionally through the design hierarchy, resolving aliases and identifying connectivity paths.
 
 ## Features
 
-- **Multi-format auto-detection**: CDL, SPICE, Spectre, Verilog, SystemVerilog
+- **Multi-format auto-detection**: CDL, SPICE, Spectre, Verilog, SystemVerilog, EDIF
 - **Bidirectional hierarchical tracing**: trace signals up and down the design tree with per-bit alias resolution
 - **Parameter specialization**: expand parameterized instances with mangled cell variants
 - **Concat-form decomposition**: decompose multi-bit vectors into per-bit assignment paths
 - **Supply-net safety**: detect and label power/ground connectivity
 - **Constant-tie optimization**: resolve tied nets to constant values
 - **JSON cache fast-path**: serialize parsed netlists for rapid re-use
+- **Include-directive resolution**: follow `.include`, `.inc`, `.lib` (SPICE/CDL — including section-aware loading for `.lib path SECTION`), `include` and `simulator lang=spice` (Spectre, including section-aware `include "path" section=NAME`) across files, with cycle detection and configurable search paths via `-include`. Path resolution honors `~` and `$VAR` environment variable expansion. Best-effort `.lib` directives (with or without section names) emit a WARNING and continue on unresolvable paths or missing sections; `.include` and `.inc` remain strict and raise.
+- **Flat-deck top synthesis**: when a netlist has no explicit top subcircuit (e.g. flat testbench decks), a synthetic top cell named `__<filename>__` is generated so deck-level instances can be traced.
 
 ## Install
 
@@ -35,7 +37,7 @@ Note: PyPI publish is not yet available. Clone the repository and install from s
 from netlist_tracer import NetlistParser
 
 # Automatic format detection
-parser = NetlistParser("design.v")  # or .sp, .cdl, .scs
+parser = NetlistParser("design.v")  # or .sp, .cdl, .scs, .edf, .edn
 
 print(f"Format: {parser.format}")
 print(f"Subcircuits: {len(parser.subckts)}")
@@ -79,12 +81,13 @@ Notation:
 ### `netlist-tracer` — hierarchical signal tracing
 
 ```
-netlist-tracer -netlist <file|dir> -cell <cell> [-pin <pin>] [-target <cell>] [-max_depth <n>] [-trace_format <fmt>] [-defines <csv>]
+netlist-tracer -netlist <file|dir> -cell <cell> [-pin <pin>] [-target <cell>] [-max_depth <n>] [-trace_format <fmt>] [-defines <csv>] [-include <dir>]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `-netlist` | Path to netlist file or Verilog directory |
+| `-include` | Search path for unresolved include directives. Searched for `.include`, `.inc`, `.lib`, and Spectre `include` directives. Repeatable. |
 | `-cell` | Starting cell or instance name |
 | `-pin` | Pin name(s), BIT-LEVEL form (e.g. `data[3]`). Comma-separated or repeated flag. Omit to trace all bit-level pins of cell. |
 | `-target` | Optional target cell (traces to all endpoints if omitted) |
@@ -107,7 +110,7 @@ Serializes a parsed netlist to JSON for fast subsequent loading.
 Parse a netlist from file, directory, or JSON cache.
 
 **Attributes:**
-- `format` — detected format: `'spice'`, `'cdl'`, `'spectre'`, `'verilog'`
+- `format` — detected format: `'spice'`, `'cdl'`, `'spectre'`, `'verilog'`, `'edif'`
 - `subckts` — dict mapping cell names to `SubcktDef` objects
 - `instances_by_parent`, `instances_by_celltype`, `instances_by_name` — lookup indices
 
@@ -167,6 +170,7 @@ Unknown pin names (typos, names that don't exist as a pin or as a bus base) erro
 | **Verilog/SystemVerilog** | Full elaboration with parameter specialization, generate-loop expansion, and alias resolution (`assign`). Multi-file support with header discovery. |
 | **SPICE/CDL** | SUBCKT / ENDS blocks. Instance lines parsed with net and parameter extraction. CDL distinguished by `*.PININFO` markers. |
 | **Spectre** | SUBCKT / ENDS (no dot prefix). Bracket-escaped special characters handled. |
+| **EDIF** | EDIF 2.0.0 (`.edf`, `.edn`). Cells, ports (including bus arrays), instances, and nets parsed; the design's top cell is identified from the `(design ...)` block. |
 | **JSON** | Fast-path cache format (output of `parser.dump_json()` or `netlist-parser` CLI). |
 
 ## Development

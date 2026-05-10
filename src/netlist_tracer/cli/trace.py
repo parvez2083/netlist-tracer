@@ -58,8 +58,8 @@ def main() -> int:
         help="Output format: text (default) or JSON",
     )
     parser.add_argument(
-        "-I",
-        "--include-path",
+        "-include",
+        dest="include_path",
         action="append",
         default=None,
         help="Additional directory to search for include files (repeatable)",

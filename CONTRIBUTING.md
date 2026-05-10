@@ -73,6 +73,8 @@ Expected: **All checks passed!**
 ruff format .
 ```
 
+Note: CI runs `ruff format --check .` as a gate; run `ruff format .` locally before committing to avoid CI failures.
+
 Then verify no new issues:
 
 ```bash
