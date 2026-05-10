@@ -40,9 +40,7 @@ def parse_edif(filename: str) -> tuple[dict[str, SubcktDef], list[Instance]]:
     # Walk (edif ...) root
     _walk_root(root, subckts, instances)
 
-    _logger.info(
-        f"EDIF parse complete: {len(subckts)} subckts, {len(instances)} instances"
-    )
+    _logger.info(f"EDIF parse complete: {len(subckts)} subckts, {len(instances)} instances")
 
     return subckts, instances
 
@@ -140,9 +138,7 @@ def _tokenize(text: str) -> Iterator[tuple[str, str, int]]:
         # Atom (alphanumeric, symbols)
         if ch.isalnum() or ch in "-_*+/<>=!?&|^~':":
             j = i
-            while j < len(text) and (
-                text[j].isalnum() or text[j] in "-_*+/<>=!?&|^~':"
-            ):
+            while j < len(text) and (text[j].isalnum() or text[j] in "-_*+/<>=!?&|^~':"):
                 j += 1
             atom_text = text[i:j]
             yield ("atom", atom_text, line_no)
@@ -284,8 +280,7 @@ def _parse_cell(
                     break
                 else:
                     _logger.info(
-                        f"Skipping {cell_name} view type {view_type} "
-                        f"(only NETLIST supported)"
+                        f"Skipping {cell_name} view type {view_type} (only NETLIST supported)"
                     )
 
     if netlist_view is None:
@@ -374,9 +369,7 @@ def _parse_interface(interface_node: Union[str, list]) -> list[str]:
                                 orig_str = name_node[2]
                                 if isinstance(orig_str, str):
                                     # Parse "name[MSB:LSB]"
-                                    m = re.match(
-                                        r"(\w+)\[(\d+):(\d+)\]", orig_str
-                                    )
+                                    m = re.match(r"(\w+)\[(\d+):(\d+)\]", orig_str)
                                     if m:
                                         port_name = m.group(1)
                                         msb_str = m.group(2)
@@ -556,7 +549,9 @@ def _extract_portref(
     return instance_name, port_name
 
 
-def _walk_root(root: Union[str, list], subckts: dict[str, SubcktDef], instances: list[Instance]) -> None:
+def _walk_root(
+    root: Union[str, list], subckts: dict[str, SubcktDef], instances: list[Instance]
+) -> None:
     """Walk (edif ...) root, extracting libraries and cells.
 
     Args:

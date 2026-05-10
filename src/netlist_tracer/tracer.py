@@ -188,6 +188,7 @@ class BidirectionalTracer:
             print(f"ERROR: '{start_name}' not found as cell type or instance name", file=sys.stderr)
             # Suggest similar cell names using fuzzy matching
             import difflib
+
             all_cells = list(self.parser.subckts.keys())
             suggestions = difflib.get_close_matches(start_name, all_cells, n=10, cutoff=0.6)
             if suggestions:
@@ -207,6 +208,7 @@ class BidirectionalTracer:
                 )
                 # Suggest similar cell names using fuzzy matching
                 import difflib
+
                 all_cells = list(self.parser.subckts.keys())
                 suggestions = difflib.get_close_matches(target_name, all_cells, n=10, cutoff=0.6)
                 if suggestions:

@@ -27,7 +27,9 @@ def test_detect_format_spectre(synthetic_spectre_basic_scs):
     assert fmt == "spectre", f"Expected spectre, got {fmt}"
 
 
-def test_detect_format_edif(vendored_AND_gate_edf, vendored_n_bit_counter_edf, vendored_one_counter_edf):
+def test_detect_format_edif(
+    vendored_AND_gate_edf, vendored_n_bit_counter_edf, vendored_one_counter_edf
+):
     """Test detection of EDIF format across all three vendored fixtures."""
     for fixture in [vendored_AND_gate_edf, vendored_n_bit_counter_edf, vendored_one_counter_edf]:
         fmt = detect_format([fixture])

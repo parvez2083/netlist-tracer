@@ -94,9 +94,7 @@ def expand_includes(
                     raw_path = include_info  # type: ignore[assignment]
 
                 try:
-                    resolved_path = _resolve_include_path(
-                        raw_path, abs_path, include_paths
-                    )
+                    resolved_path = _resolve_include_path(raw_path, abs_path, include_paths)
                 except NetlistParseError:
                     raise
 
@@ -115,9 +113,7 @@ def expand_includes(
     return expanded_lines
 
 
-def _resolve_include_path(
-    raw_path: str, including_file: str, include_paths: list[str]
-) -> str:
+def _resolve_include_path(raw_path: str, including_file: str, include_paths: list[str]) -> str:
     """Resolve include path using tilde expansion and search paths.
 
     Args:
@@ -145,8 +141,7 @@ def _resolve_include_path(
         else:
             search_list = [expanded]
             raise NetlistParseError(
-                f"Include path not found: {raw_path}\n"
-                f"Searched: {', '.join(search_list)}"
+                f"Include path not found: {raw_path}\nSearched: {', '.join(search_list)}"
             )
 
     # Search relative to including file's directory
@@ -164,8 +159,7 @@ def _resolve_include_path(
         search_list_items.append(candidate)
 
     raise NetlistParseError(
-        f"Include path not found: {raw_path}\n"
-        f"Searched: {', '.join(search_list_items)}"
+        f"Include path not found: {raw_path}\nSearched: {', '.join(search_list_items)}"
     )
 
 
@@ -191,9 +185,7 @@ def _parse_spice_include_directive(line: str) -> Optional[tuple[str, str] | str]
         return path
 
     # .lib "path" libname or .lib path libname
-    match = re.match(
-        r"^\.lib\s+['\"]?([^'\"]+)['\"]?\s+(\S+)\s*$", line, re.IGNORECASE
-    )
+    match = re.match(r"^\.lib\s+['\"]?([^'\"]+)['\"]?\s+(\S+)\s*$", line, re.IGNORECASE)
     if match:
         path = match.group(1).strip()
         libname = match.group(2).strip()

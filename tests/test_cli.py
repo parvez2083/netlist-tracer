@@ -149,6 +149,7 @@ def test_cli_auto_detect_edif() -> None:
         assert data["format"] == "edif", "EDIF format should be auto-detected"
     finally:
         import os
+
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
@@ -236,6 +237,7 @@ def test_cli_edif_extension_edn() -> None:
             assert data["format"] == "edif", ".edn extension should be auto-detected as EDIF"
         finally:
             import os
+
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 

@@ -31,7 +31,9 @@ def _parser_snapshot(parser: object) -> dict:
     }
 
 
-def _trace_snapshot(tracer: object, start_cell: str, start_pin: str, max_depth: int | None = None) -> dict:
+def _trace_snapshot(
+    tracer: object, start_cell: str, start_pin: str, max_depth: int | None = None
+) -> dict:
     """Build trace snapshot in same schema as _capture_baseline.trace_snapshot()."""
     paths = tracer.trace(start_cell, start_pin, max_depth=max_depth)
     seen = set()

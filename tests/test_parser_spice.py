@@ -56,7 +56,9 @@ def test_spice_flat_deck_synthesizes_top(synthetic_spice_flat_deck_sp):
         f"Synthetic top '__spice_flat_deck__' not found. Subckts: {list(parser.subckts.keys())}"
     )
     synthetic_top = parser.subckts["__spice_flat_deck__"]
-    assert synthetic_top.pins == [], f"Synthetic top should have empty pins, got {synthetic_top.pins}"
+    assert synthetic_top.pins == [], (
+        f"Synthetic top should have empty pins, got {synthetic_top.pins}"
+    )
 
 
 def test_spice_flat_deck_top_level_instances_captured(synthetic_spice_flat_deck_sp):

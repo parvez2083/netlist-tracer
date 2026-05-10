@@ -118,6 +118,7 @@ def main() -> int:
         )
         # Suggest similar cell names using fuzzy matching
         import difflib
+
         all_cells = list(nl_parser.subckts.keys())
         suggestions = difflib.get_close_matches(start_name, all_cells, n=10, cutoff=0.6)
         if suggestions:

@@ -286,7 +286,7 @@ class TestIncludeSupport:
 
             parent_file = os.path.join(tmpdir, "parent.scs")
             with open(parent_file, "w") as f:
-                f.write("include \"child.scs\"\n")
+                f.write('include "child.scs"\n')
                 f.write("subckt top x y\n")
                 f.write("  x1 x y foo\n")
                 f.write("ends top\n")
@@ -318,10 +318,14 @@ class TestIncludeSupport:
 
             # Verify include expansion recognizes .include in spice mode
             from netlist_tracer.parsers.includes import expand_includes
-            expanded = expand_includes(parent_file, 'spectre')
-            expanded_text = '\n'.join([line[0] for line in expanded])
+
+            expanded = expand_includes(parent_file, "spectre")
+            expanded_text = "\n".join([line[0] for line in expanded])
 
             # The .subckt bar should be expanded from child.sp
-            assert '.subckt bar' in expanded_text, "SPICE .include should expand child SPICE content"
-            assert '.ends bar' in expanded_text, "Expanded content should include complete subckt definition"
-
+            assert ".subckt bar" in expanded_text, (
+                "SPICE .include should expand child SPICE content"
+            )
+            assert ".ends bar" in expanded_text, (
+                "Expanded content should include complete subckt definition"
+            )
