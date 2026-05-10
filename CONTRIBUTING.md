@@ -232,6 +232,10 @@ src/netlist_tracer/
 
 ## Releasing
 
+### Versioning policy
+
+The project follows [Semantic Versioning](https://semver.org/). While in `0.x.y`, the public API is considered unstable and any release may include breaking changes. The first PyPI publish will be tagged `v1.0.0` to mark the API as stable; subsequent releases follow standard semver (MAJOR for breaking, MINOR for features, PATCH for fixes).
+
 ### Preparing a Release
 
 1. **Bump version** in `src/netlist_tracer/__init__.py` and `pyproject.toml` (e.g., from `0.1.0` to `0.2.0`)

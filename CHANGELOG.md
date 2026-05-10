@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-09
+
 ### Added
 
 - Multi-format netlist parsing with automatic format detection: CDL, SPICE, Spectre, Verilog, SystemVerilog.
@@ -28,7 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    pins: {name: {paths: [{formatted, steps: [{cell, pin_or_net, direction, instance_name, inst_stack}]}]}}}
   ```
   Info-level logs are suppressed in this mode so stdout is pure JSON.
-- JSON cache schema versioning: caches now carry `"schema_version": 1`. Loaders treat missing fields as legacy v0 (still supported) and raise `NetlistParseError` for newer-than-supported versions. Existing caches load without modification.
+- JSON cache schema versioning. Loaders accept v0 (legacy, no field), v1 (aliases as list of pairs, indented), and v2 (aliases as dict, compact encoding) and raise `NetlistParseError` for unknown future versions. Existing caches load without modification.
+- JSON cache write is now ~2-3× faster on large designs and produces ~25% smaller files (compact encoding, dict-form aliases, removed redundant defensive list copies). Sample workload (1,728-module SystemVerilog cache): write 1.8 s → 0.6 s, file 36 MB → 27 MB.
 - Nested `generate-for` blocks: alias unrolling now iterates to fixed-point (max depth 8) so loop variables are correctly substituted in 2-level nested blocks.
 - Custom exception hierarchy: `NetlistError`, `NetlistParseError`, `TraceError`.
 - `"Did you mean: [...]"` suggestion list when a pin or cell name is not found, including bare-bus-name suggestions when an indexed bus exists.

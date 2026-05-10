@@ -13,7 +13,9 @@ from netlist_tracer.exceptions import NetlistParseError
 
 
 def test_dump_includes_schema_version() -> None:
-    """Verify that dump_json() includes schema_version=1 field."""
+    """Verify that dump_json() includes a current schema_version field."""
+    from netlist_tracer.parser import _CACHE_SCHEMA_VERSION
+
     with tempfile.TemporaryDirectory() as tmpdir:
         # Parse a minimal fixture (using spice_basic.sp)
         fixture_path = Path(__file__).parent / "fixtures" / "synthetic" / "spice_basic.sp"
@@ -22,15 +24,15 @@ def test_dump_includes_schema_version() -> None:
         parser = NetlistParser(str(fixture_path))
 
         # Dump to JSON
-        out_path = Path(tmpdir) / "v1_cache.json"
+        out_path = Path(tmpdir) / "cache.json"
         parser.dump_json(str(out_path))
 
-        # Load JSON and verify schema_version field
+        # Load JSON and verify schema_version field matches current version
         with open(out_path) as f:
             data = json.load(f)
         assert "schema_version" in data, "schema_version field missing from dumped JSON"
-        assert data["schema_version"] == 1, (
-            f"Expected schema_version=1, got {data['schema_version']}"
+        assert data["schema_version"] == _CACHE_SCHEMA_VERSION, (
+            f"Expected schema_version={_CACHE_SCHEMA_VERSION}, got {data['schema_version']}"
         )
 
 

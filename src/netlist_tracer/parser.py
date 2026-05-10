@@ -19,7 +19,7 @@ from netlist_tracer.parsers.verilog.specialize import _sv_assemble, _sv_speciali
 
 _logger = get_logger(__name__)
 
-_CACHE_SCHEMA_VERSION = 1
+_CACHE_SCHEMA_VERSION = 2
 
 
 class NetlistParser:
@@ -108,8 +108,10 @@ class NetlistParser:
     def _load_json(self, filepath: str) -> None:
         """Load pre-parsed netlist data from JSON cache.
 
-        Supports both v0 (legacy, no schema_version field) and v1 (with schema_version=1).
-        Raises NetlistParseError if schema_version is present but newer than supported.
+        Supports v0 (legacy, no schema_version field), v1 (aliases as
+        list of [lhs, rhs] pairs), and v2 (aliases as dict, compact
+        encoding). Raises NetlistParseError if schema_version is newer
+        than supported.
         """
         with open(filepath) as f:
             data = json.load(f)
@@ -143,7 +145,9 @@ class NetlistParser:
         for cell, pairs in (data.get("aliases") or {}).items():
             subckt: SubcktDef | None = self.subckts.get(cell)
             if subckt is not None and pairs:
-                merge_aliases_into_subckt(subckt, pairs)
+                # v2 stores aliases as dict {lhs: rhs}; v0/v1 as list of [lhs, rhs] pairs.
+                items = pairs.items() if isinstance(pairs, dict) else pairs
+                merge_aliases_into_subckt(subckt, items)
 
         for inst_data in data["instances"]:
             self._add_instance(
@@ -254,32 +258,30 @@ class NetlistParser:
     def dump_json(self, out_path: str) -> None:
         """Write parsed model to JSON cache file.
 
-        Includes schema_version field for forward compatibility. Future upgrades
-        can check this field to detect v0 caches (legacy, without field) and apply
-        migrations. Currently v1 = no migration needed from v0.
+        Output is compact (no indentation) and machine-oriented. Use
+        `python3 -m json.tool < cache.json` to inspect by eye.
+
+        Schema version (v2) differences vs older caches the loader still
+        understands (v0/v1):
+          - Aliases stored as dict {lhs: rhs} (was list of [lhs, rhs] pairs)
+          - Compact JSON output (no indentation)
+          - No defensive list copies on pin/net references
 
         Args:
             out_path: Output file path.
         """
-        subckts_out = {name: list(sub.pins) for name, sub in self.subckts.items()}
-        instances_out = []
-        for _parent_cell, insts in self.instances_by_parent.items():
-            for inst in insts:
-                instances_out.append(
-                    {
-                        "name": inst.name,
-                        "cell_type": inst.cell_type,
-                        "nets": list(inst.nets),
-                        "parent_cell": inst.parent_cell,
-                    }
-                )
-        aliases_out = {}
-        for name, sub in self.subckts.items():
-            if not sub.aliases:
-                continue
-            pairs = sorted([list(p) for p in sub.aliases.items()])
-            if pairs:
-                aliases_out[name] = pairs
+        subckts_out = {name: sub.pins for name, sub in self.subckts.items()}
+        instances_out = [
+            {
+                "name": inst.name,
+                "cell_type": inst.cell_type,
+                "nets": inst.nets,
+                "parent_cell": inst.parent_cell,
+            }
+            for insts in self.instances_by_parent.values()
+            for inst in insts
+        ]
+        aliases_out = {name: dict(sub.aliases) for name, sub in self.subckts.items() if sub.aliases}
         output = {
             "schema_version": _CACHE_SCHEMA_VERSION,
             "format": self.format,
@@ -291,7 +293,7 @@ class NetlistParser:
         out_dir = os.path.dirname(os.path.abspath(out_path))
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
-        with open(out_path, "w") as fh:
-            json.dump(output, fh, indent=2)
+        with open(out_path, "w", buffering=65536) as fh:
+            json.dump(output, fh, separators=(",", ":"))
         kb = os.path.getsize(out_path) / 1024
         _logger.info(f"Output: {out_path} ({kb:.0f} KB)")

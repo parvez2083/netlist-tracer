@@ -6,6 +6,8 @@ import json
 import subprocess
 from pathlib import Path
 
+from netlist_tracer import __version__
+
 
 def test_cli_single_pin_byte_identical() -> None:
     """Verify single-pin CLI output is byte-identical to baseline."""
@@ -96,7 +98,7 @@ def test_cli_trace_format_json() -> None:
 
     # Verify schema keys
     assert data["tool"] == "netlist-tracer", "Tool field is incorrect"
-    assert data["version"] == "0.1.0", "Version field is incorrect"
+    assert data["version"] == __version__, "Version field must match netlist_tracer.__version__"
     assert data["cell"] == "picorv32", "Cell field is incorrect"
     assert data["target"] is None, "Target field should be None"
     assert isinstance(data["pins"], dict), "Pins should be a dict"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -34,7 +35,7 @@ class Instance:
     )  # param=value pairs from SPICE instance lines
 
 
-def merge_aliases_into_subckt(sub: SubcktDef, pairs: list[tuple[str, str]]) -> None:
+def merge_aliases_into_subckt(sub: SubcktDef, pairs: Iterable[tuple[str, str]]) -> None:
     """Merge a list of (lhs, rhs) `assign` pairs into sub.aliases using
     union-find. Port names (members of sub.pins) are preferred as roots so
     that going DOWN from a parent into the cell still resolves to the
