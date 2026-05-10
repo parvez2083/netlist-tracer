@@ -65,5 +65,21 @@ class TestCacheRoundtrip:
             paths2 = tracer2.trace(start_cell, start_pin)
             formatted2 = sorted(set(format_path(p) for p in paths2))
 
-        # Must match
+        # Structural assertions: detect drift that trace-only roundtrip might miss
+        assert sorted(parser1.subckts.keys()) == sorted(parser2.subckts.keys()), (
+            f"Subcircuit mismatch for {format_name}"
+        )
+
+        for cell in parser1.subckts.keys():
+            inst1_names = sorted(inst.name for inst in parser1.instances_by_parent[cell])
+            inst2_names = sorted(inst.name for inst in parser2.instances_by_parent[cell])
+            assert inst1_names == inst2_names, f"Instance mismatch in {cell} for {format_name}"
+
+        for cell in parser1.subckts.keys():
+            if hasattr(parser1.subckts[cell], "aliases"):
+                assert parser1.subckts[cell].aliases == parser2.subckts[cell].aliases, (
+                    f"Alias map mismatch in {cell} for {format_name}"
+                )
+
+        # Trace equality must still hold
         assert formatted2 == formatted1, f"Cache roundtrip mismatch for {format_name}"
