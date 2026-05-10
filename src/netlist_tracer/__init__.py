@@ -5,7 +5,7 @@ from netlist_tracer.model import Instance, SubcktDef, merge_aliases_into_subckt
 from netlist_tracer.parser import NetlistParser
 from netlist_tracer.tracer import BidirectionalTracer, TraceStep, format_path
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "NetlistParser",

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "netlist-tracer"
-version = "0.2.0"
+version = "0.3.0"
 description = "Multi-format netlist parser and bidirectional signal tracer (Verilog/SystemVerilog, SPICE/CDL, Spectre)."
 readme = "README.md"
 license = { text = "MIT" }
@@ -38,7 +38,7 @@ target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
-ignore = ["E501", "UP045"]
+ignore = ["E501", "UP045", "UP007"]  # UP007: Union[X, Y] pipe syntax requires Python 3.10+ at runtime; project supports 3.9
 
 [tool.mypy]
 # Note: project supports Python >=3.9 at runtime, but mypy 2.0+ dropped 3.9 as a
@@ -54,6 +54,10 @@ disallow_incomplete_defs = true
 disallow_any_unimported = false
 warn_return_any = false
 warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+module = "netlist_tracer.parsers.edif"
+disallow_incomplete_defs = false
 
 [[tool.mypy.overrides]]
 module = "netlist_tracer.parsers.verilog.*"

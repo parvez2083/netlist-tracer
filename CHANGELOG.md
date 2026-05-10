@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-10
+
+### Added
+
+- EDIF 2.0.0 and 3.0/4.0 parser with s-expression parsing, MSB-first bus expansion, and hierarchical cell/instance/net resolution.
+- Recursive include-statement support for SPICE/CDL (`.include`, `.inc`, `.lib` directives) and Spectre (`include` and `simulator lang=spice` blocks) with cycle detection, tilde expansion, and absolute path support.
+- New `-I <dir>` / `--include-path <dir>` CLI flag (repeatable on both `netlist-tracer` and `netlist-parser` commands); new `include_paths=[...]` library API kwarg on `NetlistParser.__init__()`.
+- Vendored test fixtures: 3 EDIF designs from SpyDrNet (BSD-3 licensed) and 1 NGSpice analog SPICE example with include directives (GPL-2.0-or-later, separate work).
+- Comprehensive test suite: EDIF parser and tracer regression tests with byte-identical golden baselines, NGSpice SPICE regression tests, cache roundtrip parity across all 3 formats, and 12+ include-statement tests covering cycle detection, search-path resolution, and Spectre-specific cases.
+- CLI auto-detection for `.edif` and `.edn` file extensions.
+- "Did you mean" suggestions extended to EDIF parser cell and pin lookup errors.
+- SPICE/CDL flat-deck top synthesis: testbench files with instance lines at file scope (no enclosing `.subckt`) now have a synthetic top-level cell auto-generated with the name `__<filename_stem>__`, making those instances visible to the tracer. This enables UP-walk traces to surface sibling instances and shared nets at the testbench level. Hierarchical netlists with explicit `.subckt` wrappers are unaffected. Primitive devices (R, C, V, M) at file scope remain out of scope for hierarchy traversal.
+
+### Changed
+
+- `NetlistParser.__init__()` now accepts optional `include_paths: list[str] | None = None` kwarg for include search directories (backward-compatible).
+- SPICE and Spectre parsers no longer raise on multi-file inputs when includes are involved; included files are inlined transparently.
+- Spectre flat-deck top-level synthesis now uses the `__<filename_stem>__` naming convention to match SPICE behavior and reduce collision risk with real cell names. Previously, the synthetic top used the bare filename stem.
+- JSON cache schema remains v2 (no migration required for existing caches).
+
+### Fixed
+
+- Include cycle detection now correctly distinguishes cycles from diamond-shaped dependencies.
+- Ruff UP007 rule suppressed for Python 3.9 compatibility (Union[X, Y] syntax).
+
 ## [0.2.0] - 2026-05-09
 
 ### Added
