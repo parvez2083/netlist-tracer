@@ -218,11 +218,20 @@ def _sv_parse_ports(port_text: str, define_values: Optional[dict[str, int]] = No
         if not item:
             continue
         im = re.match(r"(\w+)\.(\w+)\s+(\w+)", item)
-        if im and im.group(1) not in ("input", "output", "inout", "logic", "wire", "reg", "real"):
+        if im and im.group(1) not in (
+            "input",
+            "output",
+            "inout",
+            "logic",
+            "wire",
+            "reg",
+            "real",
+            "electrical",
+        ):
             ports.append(_sv_make_port_entry(im.group(3)))
             continue
         item = re.sub(r"^(input|output|inout)\s+", "", item)
-        item = re.sub(r"^(logic|reg|wire|real|integer)\s+", "", item)
+        item = re.sub(r"^(logic|reg|wire|real|integer|electrical)\s+", "", item)
         item = item.strip()
         hi = lo = None
         inner_hi = inner_lo = None

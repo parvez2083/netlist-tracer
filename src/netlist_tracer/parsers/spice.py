@@ -341,7 +341,7 @@ def parse_spice(
         objects, and global_nets is a list of net names from .global directives.
     """
     # Expand includes first
-    expanded_lines = expand_includes(filename, "spice", include_paths)
+    expanded_lines, _ = expand_includes(filename, "spice", include_paths)
     lines = [line_text + "\n" for line_text, _, _ in expanded_lines]
 
     # Pre-pass: merge continuation lines

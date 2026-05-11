@@ -1,0 +1,8 @@
+// Synthetic Verilog-A fixture: analog leaf cell
+module verilog_a_leaf (electrical inp, electrical outp);
+
+  analog begin
+    V(outp, inp) <+ 0.0;
+  end
+
+endmodule

@@ -227,7 +227,7 @@ class BidirectionalTracer:
                     import difflib
 
                     def base(p: str) -> str:
-                        return re.sub(r"\[\d+\]$", "", p)
+                        return re.sub(r"(?:\[\d+\]|<\d+>)$", "", p)
 
                     # NOTE: trace_pins() expands bare bus names via
                     # expand_pin() before reaching this point. This branch
@@ -237,7 +237,9 @@ class BidirectionalTracer:
                     bus_members = [
                         p
                         for p in subckt.pins
-                        if p != start_pin and re.search(r"\[\d+\]$", p) and base(p) == start_pin
+                        if p != start_pin
+                        and re.search(r"(?:\[\d+\]|<\d+>)$", p)
+                        and base(p) == start_pin
                     ]
                     if bus_members:
                         print(f"Did you mean: {bus_members[:10]}")
@@ -409,7 +411,9 @@ class BidirectionalTracer:
         return [
             p
             for p in subckt.pins
-            if p != name and re.search(r"\[\d+\]$", p) and re.sub(r"\[\d+\]$", "", p) == name
+            if p != name
+            and re.search(r"(?:\[\d+\]|<\d+>)$", p)
+            and re.sub(r"(?:\[\d+\]|<\d+>)$", "", p) == name
         ]
 
     def trace_pins(

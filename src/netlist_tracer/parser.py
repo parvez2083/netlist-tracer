@@ -74,7 +74,7 @@ class NetlistParser:
         # Directory path: full SV elaboration
         if os.path.isdir(filename):
             self.files = []
-            for ext in ("psv", "sv", "v"):
+            for ext in ("psv", "sv", "v", "va", "vams", "vha"):
                 self.files.extend(
                     glob.glob(os.path.join(filename, "**", f"*.{ext}"), recursive=True)
                 )

@@ -1,5 +1,8 @@
 """Unit tests for the bidirectional tracer (PHASE 10)."""
 
+import os
+import tempfile
+
 from netlist_tracer import BidirectionalTracer, NetlistParser, format_path
 
 
@@ -151,3 +154,93 @@ def test_tracer_flat_deck_up_walk_reveals_siblings(synthetic_spice_flat_deck_sp)
         f"Expected tracer to find sibling cell 'ldo_aux', but it did not. "
         f"Paths: {[format_path(p) for p in paths]}"
     )
+
+
+def test_expand_pin_angle_bracket_bus_members():
+    """Test expand_pin recognizes <N> bus-bit notation."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create synthetic Spectre file with <N>-indexed bus pins
+        deck_path = os.path.join(tmpdir, "test.scs")
+        with open(deck_path, "w") as f:
+            f.write("simulator lang=spectre\n")
+            f.write("subckt leaf_cell mybus<0> mybus<1> mybus<2> ctrl\n")
+            f.write("ends leaf_cell\n")
+            f.write("subckt top vdd vss\n")
+            f.write("  x0 (vdd vdd vdd vss) leaf_cell\n")
+            f.write("ends top\n")
+
+        parser = NetlistParser(deck_path)
+        tracer = BidirectionalTracer(parser)
+
+        leaf_subckt = parser.subckts["leaf_cell"]
+
+        # Test exact pin lookup
+        result = tracer.expand_pin(leaf_subckt, "mybus<1>")
+        assert result == ["mybus<1>"], f"Exact pin lookup should return ['mybus<1>'], got {result}"
+
+        # Test bare bus base expansion
+        result = tracer.expand_pin(leaf_subckt, "mybus")
+        expected = ["mybus<0>", "mybus<1>", "mybus<2>"]
+        assert result == expected, f"expand_pin('mybus') should return {expected}, got {result}"
+
+        # Test non-existent pin
+        result = tracer.expand_pin(leaf_subckt, "nonexistent")
+        assert result == [], f"Non-existent pin should return [], got {result}"
+
+
+def test_expand_pin_mixed_bracket_conventions():
+    """Test expand_pin works with both [N] and <N> conventions in same subckt."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create synthetic Spectre file with both [N] and <N> forms
+        deck_path = os.path.join(tmpdir, "test.scs")
+        with open(deck_path, "w") as f:
+            f.write("simulator lang=spectre\n")
+            f.write("subckt leaf_cell bus_a[0] bus_a[1] bus_b<0> bus_b<1> ctrl\n")
+            f.write("ends leaf_cell\n")
+            f.write("subckt top vdd vss\n")
+            f.write("  x0 (vdd vdd vdd vdd vss) leaf_cell\n")
+            f.write("ends top\n")
+
+        parser = NetlistParser(deck_path)
+        tracer = BidirectionalTracer(parser)
+
+        leaf_subckt = parser.subckts["leaf_cell"]
+
+        # Test [N] form expansion
+        result = tracer.expand_pin(leaf_subckt, "bus_a")
+        expected = ["bus_a[0]", "bus_a[1]"]
+        assert result == expected, f"expand_pin('bus_a') should return {expected}, got {result}"
+
+        # Test <N> form expansion
+        result = tracer.expand_pin(leaf_subckt, "bus_b")
+        expected = ["bus_b<0>", "bus_b<1>"]
+        assert result == expected, f"expand_pin('bus_b') should return {expected}, got {result}"
+
+
+def test_trace_pins_expands_angle_bracket_bus_base():
+    """Test trace_pins expands bare bus base with <N> notation."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create synthetic Spectre netlist
+        deck_path = os.path.join(tmpdir, "test.scs")
+        with open(deck_path, "w") as f:
+            f.write("simulator lang=spectre\n")
+            f.write("subckt leaf (data<0> data<1> vdd)\n")
+            f.write("ends leaf\n")
+            f.write("subckt top (vdd vss)\n")
+            f.write("  x1 (vdd vdd vdd) leaf\n")
+            f.write("ends top\n")
+
+        parser = NetlistParser(deck_path)
+        tracer = BidirectionalTracer(parser)
+
+        # Call trace_pins with bare bus base name
+        result = tracer.trace_pins("leaf", pins=["data"])
+
+        # Result should have expanded keys (not 'data' itself)
+        assert "data<0>" in result, f"Result should have 'data<0>' key, got {list(result.keys())}"
+        assert "data<1>" in result, f"Result should have 'data<1>' key, got {list(result.keys())}"
+        assert "data" not in result, "Result should not have bare 'data' key"
+
+        # Each expanded key should map to a list (may be empty for unconnected pins)
+        for key in ["data<0>", "data<1>"]:
+            assert isinstance(result[key], list), f"{key} should map to a list"

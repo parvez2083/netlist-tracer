@@ -14,7 +14,7 @@ _logger = get_logger(__name__)
 
 def expand_includes(
     top_file: str, dialect: str, include_paths: Optional[list[str]] = None
-) -> list[tuple[str, str, int]]:
+) -> tuple[list[tuple[str, str, int]], list[str]]:
     """Recursively expand include statements and return flattened line stream.
 
     Args:
@@ -23,8 +23,11 @@ def expand_includes(
         include_paths: Optional list of additional search directories.
 
     Returns:
-        List of (line_text, source_file_path, source_line_no) tuples with
-        provenance preserved for error reporting.
+        Tuple of (expanded_lines, ahdl_include_paths) where:
+        - expanded_lines: List of (line_text, source_file_path, source_line_no) tuples
+          with provenance preserved for error reporting.
+        - ahdl_include_paths: List of resolved absolute paths to .va files referenced
+          via ahdl_include directives (empty list for SPICE dialect).
 
     Raises:
         NetlistParseError: On cycle detection or unresolvable path.
@@ -33,6 +36,7 @@ def expand_includes(
         include_paths = []
 
     expanded_lines: list[tuple[str, str, int]] = []
+    ahdl_include_paths: list[str] = []
     # Stack entries are (abs_path, section_filter) tuples. section_filter is either None
     # (whole-file include) or (kind, section_name) tuple. Cycle detection compares the
     # full tuple, so same file with different sections is NOT a cycle.
@@ -173,6 +177,19 @@ def expand_includes(
                 elif "spectre" in stripped.lower():
                     current_lang = "spectre"
 
+            # Parse ahdl_include directive (Spectre-only, side-channel collection)
+            if dialect == "spectre" and current_lang == "spectre":
+                ahdl_path = _parse_spectre_ahdl_include_directive(stripped)
+                if ahdl_path:
+                    try:
+                        resolved_ahdl = _resolve_include_path(ahdl_path, abs_path, include_paths)
+                        ahdl_include_paths.append(resolved_ahdl)
+                    except IncludePathNotFoundError:
+                        _logger.warning(f"Skipping ahdl_include '{ahdl_path}' — path unresolvable")
+                    line_no += 1
+                    i += 1
+                    continue
+
             # Parse include directives based on current language
             include_info: Union[tuple[str, str], str, None] = None
             if dialect == "spectre" and current_lang == "spectre":
@@ -280,7 +297,7 @@ def expand_includes(
         return section_found
 
     _expand_recursive(top_file, include_stack, current_lang=dialect)
-    return expanded_lines
+    return expanded_lines, ahdl_include_paths
 
 
 def _resolve_include_path(raw_path: str, including_file: str, include_paths: list[str]) -> str:
@@ -408,4 +425,25 @@ def _parse_spectre_include_directive(line: str) -> Optional[tuple[str, str]]:
     if match:
         return (match.group(1), "")
 
+    return None
+
+
+def _parse_spectre_ahdl_include_directive(line: str) -> Optional[str]:
+    """Match Spectre ahdl_include directive. Return the quoted path or None.
+
+    Spectre directive: ahdl_include "path" (quoted form only).
+    The path is typically a Verilog-A (.va) file containing module definitions
+    that will be parsed and merged into the parent netlist's subckt library.
+
+    Args:
+        line: Stripped line text (case-sensitive).
+
+    Returns:
+        The quoted path string on match, or None if the line is not
+        an ahdl_include directive.
+    """
+    # ahdl_include "path" (quoted form only)
+    match = re.match(r'^ahdl_include\s+"([^"]+)"\s*$', line)
+    if match:
+        return match.group(1)
     return None

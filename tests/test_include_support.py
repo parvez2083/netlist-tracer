@@ -460,8 +460,8 @@ class TestIncludeSupport:
             # Verify include expansion recognizes .include in spice mode
             from netlist_tracer.parsers.includes import expand_includes
 
-            expanded = expand_includes(parent_file, "spectre")
-            expanded_text = "\n".join([line[0] for line in expanded])
+            expanded_lines, _ = expand_includes(parent_file, "spectre")
+            expanded_text = "\n".join([line[0] for line in expanded_lines])
 
             # The .subckt bar should be expanded from child.sp
             assert ".subckt bar" in expanded_text, (

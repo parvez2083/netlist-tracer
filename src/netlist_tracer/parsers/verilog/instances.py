@@ -14,6 +14,7 @@ from netlist_tracer.parsers.verilog.structure import (
     _sv_extract_instances,
     _sv_extract_wire_widths_1d,
     _sv_extract_wires_2d,
+    _sv_find_begin_end,
     _sv_make_port_entry,
     _sv_match_paren,
     _sv_parse_ports,
@@ -129,6 +130,58 @@ def _sv_synthesize_primitive_modules(instances: list, primitive_names: set) -> t
     return updated, syn_modules
 
 
+def _strip_analog_blocks(body: str) -> str:
+    """Remove analog behavioral blocks from Verilog-A module body.
+
+    Removes both 'analog begin ... end' multi-statement blocks and single-statement
+    'analog ...;' forms. Replaces removed content with equivalent-length whitespace
+    to preserve character offsets.
+
+    Inputs:
+        body: Module body text
+
+    Outputs:
+        body with analog blocks replaced by whitespace
+    """
+    result = body
+    pos = 0
+
+    # Remove 'analog begin ... end' blocks
+    while True:
+        m = re.search(r"\banalog\s+begin\b", result[pos:], re.IGNORECASE)
+        if not m:
+            break
+
+        analog_start = pos + m.start()
+        begin_pos = pos + m.end() - 1
+        analog_end = _sv_find_begin_end(result, begin_pos)
+
+        # Extract original content for length preservation
+        removed = result[analog_start:analog_end]
+        # Replace with whitespace (preserve newlines for readability)
+        replacement = re.sub(r"[^\n]", " ", removed)
+        result = result[:analog_start] + replacement + result[analog_end:]
+        pos = analog_start + len(replacement)
+
+    # Remove single-statement 'analog ...;' forms
+    pos = 0
+    while True:
+        m = re.search(r"\banalog\s+([^;]*?);", result[pos:], re.IGNORECASE | re.DOTALL)
+        if not m:
+            break
+
+        analog_start = pos + m.start()
+        analog_end = pos + m.end()
+
+        # Extract and replace with whitespace
+        removed = result[analog_start:analog_end]
+        replacement = re.sub(r"[^\n]", " ", removed)
+        result = result[:analog_start] + replacement + result[analog_end:]
+        pos = analog_start + len(replacement)
+
+    return result
+
+
 def _sv_parse_file(args: tuple[str, dict, set, dict]) -> list:
     """Parse one file → list of module dicts (designed for Pool.map)."""
     filepath, tvars, defines, define_values = args
@@ -141,6 +194,7 @@ def _sv_parse_file(args: tuple[str, dict, set, dict]) -> list:
         raw = _sv_substitute_vars(raw, tvars)
     raw = _sv_strip_comments(raw)
     raw = _sv_preprocess(raw, defines)
+    raw = _strip_analog_blocks(raw)
     modules = []
     pos = 0
     while True:

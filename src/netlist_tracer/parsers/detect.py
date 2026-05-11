@@ -3,6 +3,29 @@ from __future__ import annotations
 import re
 
 
+def _recognize_va_module(content: str) -> bool:
+    """Detect Verilog-A module based on structural markers.
+
+    Checks for either 'electrical' port type or 'analog begin' block
+    within the first 4 KB of content.
+
+    Inputs:
+        content: File content (typically first 4 KB)
+
+    Outputs:
+        True if Verilog-A markers detected, False otherwise
+    """
+    # Check for 'electrical' keyword (Verilog-A port type)
+    if re.search(r"\belectrical\b", content, re.IGNORECASE):
+        return True
+
+    # Check for 'analog begin' block (Verilog-A behavioral section)
+    if re.search(r"\banalog\s+begin\b", content, re.IGNORECASE):
+        return True
+
+    return False
+
+
 def detect_format(filepaths: list[str]) -> str:
     """Detect netlist format from file content syntax.
 
@@ -24,14 +47,24 @@ def detect_format(filepaths: list[str]) -> str:
 
     for filepath in filepaths:
         # Fast path: check extension
-        if filepath.lower().endswith((".edif", ".edn", ".edf")):
+        lower_path = filepath.lower()
+        if lower_path.endswith((".edif", ".edn", ".edf")):
             return "edif"
 
+        # Verilog-A: .va, .vams, .vha extensions
+        if lower_path.endswith((".va", ".vams", ".vha")):
+            return "verilog"
+
         with open(filepath) as f:
-            # Check first 4 KB for EDIF marker
+            # Check first 4 KB for EDIF marker and Verilog-A markers
             content_start = f.read(4096)
             if re.search(r"\(edif\s", content_start, re.IGNORECASE):
                 return "edif"
+
+            # Check for Verilog-A content markers
+            if _recognize_va_module(content_start):
+                return "verilog"
+
             f.seek(0)
 
             for line in f:

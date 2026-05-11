@@ -183,3 +183,15 @@ def synthetic_spice_edge_tab_continuation_sp(fixtures_synthetic_dir):
 def synthetic_spice_edge_mixed_case_sp(fixtures_synthetic_dir):
     """Path to synthetic spice_edge_mixed_case.sp fixture."""
     return os.path.join(fixtures_synthetic_dir, "spice_edge_mixed_case.sp")
+
+
+@pytest.fixture
+def synthetic_verilog_a_leaf_va(fixtures_synthetic_dir):
+    """Path to synthetic verilog_a_leaf.va fixture (Verilog-A leaf cell)."""
+    return os.path.join(fixtures_synthetic_dir, "verilog_a_leaf.va")
+
+
+@pytest.fixture
+def synthetic_verilog_a_parent_v(fixtures_synthetic_dir):
+    """Path to synthetic verilog_a_parent.v fixture (parent instantiating Verilog-A)."""
+    return os.path.join(fixtures_synthetic_dir, "verilog_a_parent.v")

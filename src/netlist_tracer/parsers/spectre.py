@@ -4,8 +4,13 @@ import os
 import re
 from typing import Optional
 
+from netlist_tracer._logging import get_logger
 from netlist_tracer.model import Instance, SubcktDef
 from netlist_tracer.parsers.includes import expand_includes
+from netlist_tracer.parsers.verilog.instances import _sv_parse_file
+from netlist_tracer.parsers.verilog.specialize import _sv_assemble, _sv_specialize_modules
+
+_logger = get_logger(__name__)
 
 
 def parse_spectre(
@@ -22,7 +27,7 @@ def parse_spectre(
         names to SubcktDef objects and instances_list is a list of Instance objects.
     """
     # Expand includes first
-    expanded_lines = expand_includes(filename, "spectre", include_paths)
+    expanded_lines, ahdl_include_paths = expand_includes(filename, "spectre", include_paths)
     raw_lines = [line_text + "\n" for line_text, _, _ in expanded_lines]
 
     subckts: dict[str, SubcktDef] = {}
@@ -44,8 +49,17 @@ def parse_spectre(
     if buf:
         lines.append(buf)
 
-    # Strip \< and \> bracket escaping
-    lines = [line_item.replace("\\<", "<").replace("\\>", ">") for line_item in lines]  # noqa: E741
+    # Strip Spectre escape syntax: \X -> X for special chars (<, >, (, ), [, ], ,).
+    lines = [
+        line_item.replace("\\<", "<")
+        .replace("\\>", ">")
+        .replace("\\(", "(")
+        .replace("\\)", ")")
+        .replace("\\[", "[")
+        .replace("\\]", "]")
+        .replace("\\,", ",")
+        for line_item in lines
+    ]  # noqa: E741
 
     skip_prefixes = (
         "simulator",
@@ -99,6 +113,10 @@ def parse_spectre(
             subckts[top_cell] = SubcktDef(name=top_cell, pins=[])
         subckt_bodies[top_cell] = top_level_lines
 
+    # Load ahdl_include'd Verilog-A modules BEFORE second pass so instance lookups resolve against them.
+    if ahdl_include_paths:
+        _load_ahdl_include_modules(ahdl_include_paths, subckts)
+
     # Second pass: parse instances in each subckt body
     for cell_name, body_lines in subckt_bodies.items():
         for line in body_lines:
@@ -110,6 +128,58 @@ def parse_spectre(
                 instances.append(instance)
 
     return subckts, instances
+
+
+def _load_ahdl_include_modules(ahdl_paths: list[str], subckts: dict[str, SubcktDef]) -> None:
+    """Parse Verilog-A files from ahdl_include directives and merge into subckts.
+
+    Args:
+        ahdl_paths: List of resolved absolute paths to .va files.
+        subckts: Existing subckt dict — mutated in place.
+
+    Returns:
+        None.
+    """
+    # Deduplicate preserving order
+    seen = set()
+    unique_paths = []
+    for p in ahdl_paths:
+        if p not in seen:
+            seen.add(p)
+            unique_paths.append(p)
+
+    all_va_modules = []
+    for va_path in unique_paths:
+        try:
+            # _sv_parse_file expects a tuple: (filepath, tvars, defines, define_values)
+            va_modules = _sv_parse_file((va_path, {}, set(), {}))
+            if va_modules:
+                all_va_modules.extend(va_modules)
+        except Exception as e:
+            _logger.warning(
+                f"Skipping ahdl_include '{va_path}' — parse error: {type(e).__name__}: {e}"
+            )
+
+    if not all_va_modules:
+        return
+
+    # Specialize and assemble Verilog-A modules
+    try:
+        _sv_specialize_modules(all_va_modules, {})
+        va_subckts_dict, _ = _sv_assemble(all_va_modules, top=None, define_values={})
+    except Exception as e:
+        _logger.warning(f"Verilog-A assembly failed: {type(e).__name__}: {e}")
+        return
+
+    # Merge into subckts (Spectre wins on collision)
+    for name, subckt in va_subckts_dict.items():
+        if name not in subckts:
+            subckts[name] = subckt
+        else:
+            _logger.info(
+                f"ahdl_include module '{name}' collides with existing Spectre subckt; "
+                f"Spectre definition takes precedence"
+            )
 
 
 def _parse_spectre_instance(
