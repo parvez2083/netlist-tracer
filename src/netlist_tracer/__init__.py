@@ -6,7 +6,7 @@ from netlist_tracer.parser import NetlistParser
 from netlist_tracer.parsers.spice_helpers import parse_numerical
 from netlist_tracer.tracer import BidirectionalTracer, TraceStep, format_path
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 __all__ = [
     "NetlistParser",

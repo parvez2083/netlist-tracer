@@ -11,15 +11,19 @@ Parse and analyze semiconductor netlists across CDL, SPICE, Spectre, Verilog, Sy
 
 ## Features
 
-- **Multi-format auto-detection**: CDL, SPICE, Spectre, Verilog, SystemVerilog, EDIF
+- **Multi-format auto-detection**: CDL, SPICE, Spectre, Verilog, SystemVerilog, EDIF, Verilog-A
 - **Bidirectional hierarchical tracing**: trace signals up and down the design tree with per-bit alias resolution
-- **Parameter specialization**: expand parameterized instances with mangled cell variants
+- **Parameter specialization**: expand parameterized instances with mangled cell variants; `defparam` resolution per Verilog LRM
 - **Concat-form decomposition**: decompose multi-bit vectors into per-bit assignment paths
 - **Supply-net safety**: detect and label power/ground connectivity
 - **Constant-tie optimization**: resolve tied nets to constant values
 - **JSON cache fast-path**: serialize parsed netlists for rapid re-use
-- **Include-directive resolution**: follow `.include`, `.inc`, `.lib` (SPICE/CDL — including section-aware loading for `.lib path SECTION`), `include` and `simulator lang=spice` (Spectre, including section-aware `include "path" section=NAME`) across files, with cycle detection and configurable search paths via `-include`. Path resolution honors `~` and `$VAR` environment variable expansion. Best-effort `.lib` directives (with or without section names) emit a WARNING and continue on unresolvable paths or missing sections; `.include` and `.inc` remain strict and raise.
+- **Include-directive resolution**: follow `.include`, `.inc`, `.lib` (SPICE/CDL — including section-aware loading for `.lib path SECTION`), `include` and `simulator lang=spice` (Spectre, including section-aware `include "path" section=NAME"`, and `ahdl_include` for Verilog-A) across files, with cycle detection and configurable search paths via `-include`. Path resolution honors `~` and `$VAR` environment variable expansion. Best-effort `.lib` directives (with or without section names) emit a WARNING and continue on unresolvable paths or missing sections; `.include` and `.inc` remain strict and raise. Verilog-A `.va` files referenced by `ahdl_include` are merged transparently; malformed files emit WARNING and are skipped.
 - **Flat-deck top synthesis**: when a netlist has no explicit top subcircuit (e.g. flat testbench decks), a synthetic top cell named `__<filename>__` is generated so deck-level instances can be traced.
+- **Advanced SPICE/CDL support**: HSPICE inline comments (`;` and `$`), continuation lines merging across `*` comment lines, controlled-source elements (B/E/F/G/H) as instances with control source tracking, coupled inductors (K), `.global` directive parsing, and engineering-suffix-aware numeric parsing via `parse_numerical()` helper.
+- **Verilog elaboration**: `generate-if` and `generate-case` block unrolling, built-in gate primitives (and/or/nand/nor/xor/xnor/buf/not) as instances, `defparam` override semantics.
+- **Bus notation**: both `[N]` (Verilog) and `<N>` (Spectre/Cadence) conventions supported in `expand_pin` and bare-bus suggestions.
+- **Performance harness**: regression test for 1000-instance designs marked `@pytest.mark.slow`, opt-in via `-m slow`.
 
 ## Install
 

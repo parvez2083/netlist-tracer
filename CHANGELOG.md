@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-10
+
+### Added
+
+- HSPICE inline `;` and `$` end-of-line comments (quote-state-aware).
+- Continuation lines with `+` now merge across intervening `*` comment lines.
+- Controlled-source elements B/E/F/G/H recognized as instances with cell types `B_BSRC`, `E_VCVS`, `G_VCCS`, `F_CCCS`, and `H_CCVS`. Control source names stored in `params['_vctrl']` for F and H types.
+- K (coupled-inductor) elements recognized; coupling coefficient stored in `params['_k_coeff']`.
+- `.global` directive parsing; global net list accessible via `NetlistParser.global_nets`.
+- Public helper function `parse_numerical(value_str)` for engineering-suffix-aware numeric parsing (supports T/G/MEG/K/M/U/μ/N/P/F/A); importable from `netlist_tracer` and `netlist_tracer.parsers`.
+- Verilog/SystemVerilog `generate-if` and `generate-case` block unrolling for parameterized modules.
+- Built-in Verilog gate primitives (and/or/nand/nor/xor/xnor/buf/not) recognized as instances with synthesized `SubcktDef` entries per (type, arity) pair.
+- `defparam` resolution with Verilog LRM semantics: `defparam` values override inline `#()` parameter assignments.
+- Cache roundtrip parity test deepened with structural assertions: subckt keys, instance names, and alias maps checked before trace-equality comparison.
+- Performance regression harness: synthetic 1000-instance Verilog test marked `@pytest.mark.slow`, opt-in via `-m slow` flag.
+- Verilog-A port shells: `electrical` ports recognized as structural pins; `analog begin ... end` and single-statement `analog ...;` blocks stripped to whitespace; file extensions `.va`, `.vams`, `.vha` auto-detected.
+- Spectre `ahdl_include "path"` directive: routes referenced Verilog-A files to the Verilog parser, then merges resulting modules into the design. Spectre module definitions win on collision; malformed `.va` files emit WARNING and are skipped.
+- Bus-bit notation `<N>` (Spectre/Cadence convention) recognized alongside existing `[N]` (Verilog) convention in `expand_pin` and bare-bus suggestion logic.
+
+### Changed
+
+- `parse_spice()` function signature now returns 3-tuple `(subckts, instances, global_nets)` to expose `.global` net list; existing callers updated. Downstream consumers using `NetlistParser` API see only the new `parser.global_nets` attribute.
+- Spectre escape syntax extended: in addition to `\<` and `\>`, the line-cleanup pass now strips backslash escapes for `\(`, `\)`, `\[`, `\]`, `\,` to handle net names with these special characters.
+- Internal table `_PRIMITIVE_PIN_NAMES` introduced for Verilog gate primitives to ensure consistent pin orderings in synthesized `SubcktDef` cells (e.g., `__prim_nand_3__`).
+
+### Fixed
+
+- (No fixes in v0.4.0 — all changes are feature additions)
+
 ## [0.3.1] - 2026-05-10
 
 ### Added
