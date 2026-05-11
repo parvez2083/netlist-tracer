@@ -1,4 +1,4 @@
-# PyPI publish setup — TWO paths supported (DISPUTE_2 resolution v2):
+# PyPI publish workflow. Two paths are supported:
 #
 # PRIMARY: Trusted Publishing (no secrets required). Setup once:
 #   1. Claim project name on PyPI: https://pypi.org/manage/account/publishing/
@@ -11,15 +11,15 @@
 #   2. Add as GitHub Actions secret named PYPI_API_TOKEN (Settings -> Secrets)
 #   When this secret is present, the workflow uses it instead of trusted publishing.
 #
-# In both cases: tag a release to trigger:
-#   git tag v0.1.0 && git push origin v0.1.0
-# This workflow is DORMANT until step 4 of either setup path completes.
+# Trigger: currently set to manual (workflow_dispatch) only — no PyPI publish
+# is configured yet. When ready to publish, change the trigger to fire on a
+# version-tag push (e.g. `tags: ['v[1-9]*']` to skip pre-1.0 development tags
+# or `tags: ['v*']` for all version tags).
 
 name: Release
 
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
 
 jobs:
   build-and-publish:
