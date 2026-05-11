@@ -91,6 +91,7 @@ netlist-tracer -netlist <file|dir> -cell <cell> [-pin <pin>] [-target <cell>] [-
 | Option | Description |
 |--------|-------------|
 | `-netlist` | Path to netlist file or Verilog directory |
+| `-format` | Explicit format specification: `spice`, `cdl`, `spectre`, `verilog`, `edif`, or `auto` (default). Overrides auto-detection. |
 | `-include` | Search path for unresolved include directives. Searched for `.include`, `.inc`, `.lib`, and Spectre `include` directives. Repeatable. |
 | `-cell` | Starting cell or instance name |
 | `-pin` | Pin name(s), BIT-LEVEL form (e.g. `data[3]`). Comma-separated or repeated flag. Omit to trace all bit-level pins of cell. |
@@ -109,12 +110,15 @@ Serializes a parsed netlist to JSON for fast subsequent loading.
 
 ## Library API
 
-### `NetlistParser(filename, tvars=None, defines=None, define_values=None, top=None, workers=0)`
+### `NetlistParser(filename, tvars=None, defines=None, define_values=None, top=None, workers=0, format='auto')`
 
 Parse a netlist from file, directory, or JSON cache.
 
+**Parameters:**
+- `format` — explicit format specification: `'spice'`, `'cdl'`, `'spectre'`, `'verilog'`, `'edif'`, or `'auto'` (default). Overrides auto-detection if a specific format is provided. Invalid values raise `NetlistParseError`.
+
 **Attributes:**
-- `format` — detected format: `'spice'`, `'cdl'`, `'spectre'`, `'verilog'`, `'edif'`
+- `format` — detected or specified format: `'spice'`, `'cdl'`, `'spectre'`, `'verilog'`, `'edif'`
 - `subckts` — dict mapping cell names to `SubcktDef` objects
 - `instances_by_parent`, `instances_by_celltype`, `instances_by_name` — lookup indices
 

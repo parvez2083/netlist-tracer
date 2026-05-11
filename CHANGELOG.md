@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-11
+
+### Added
+
+- `format` parameter on `NetlistParser.__init__()` to override auto-detection. Allowed values: `spice`, `cdl`, `spectre`, `verilog`, `edif`, `auto` (default). Invalid values raise `NetlistParseError`.
+- `-format` CLI flag on `netlist-tracer` and `netlist-parser` commands for explicit format specification (same allowed values).
+- `parse_numerical` helper now lives at `netlist_tracer.parsers._numerics` (still re-exported from both `netlist_tracer` and `netlist_tracer.parsers` for backward compatibility).
+
+### Changed
+
+- Format auto-detection is now content-first. Previously file extensions (`.edif`, `.edn`, `.edf`, `.va`, `.vams`, `.vha`) short-circuited detection; now the first ~4 KB of each file is scored for known format markers. Highest-scoring format wins; extension consulted only as a tiebreaker. See `detect_format` docstring for marker scoring weights.
+- Release workflow (`.github/workflows/release.yml`) trigger changed from `push: tags: ['v*']` to `workflow_dispatch:` (manual only). Pre-1.0 development tags no longer trigger PyPI publishing. Tag-based publishing will resume when PyPI credentials (trusted publishing or API token) are configured.
+
+### Fixed
+
+- (No user-facing bug fixes in v0.4.1; release focused on format detection refactor and explicit format control for forward compatibility)
+
 ## [0.4.0] - 2026-05-10
 
 ### Added
