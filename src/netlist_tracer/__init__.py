@@ -3,7 +3,7 @@
 from netlist_tracer.exceptions import NetlistError, NetlistParseError, TraceError
 from netlist_tracer.model import Instance, SubcktDef, merge_aliases_into_subckt
 from netlist_tracer.parser import NetlistParser
-from netlist_tracer.parsers.spice_helpers import parse_numerical
+from netlist_tracer.parsers._numerics import parse_numerical
 from netlist_tracer.tracer import BidirectionalTracer, TraceStep, format_path
 
 __version__ = "0.4.0"

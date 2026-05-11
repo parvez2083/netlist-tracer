@@ -3,29 +3,29 @@
 # AI GENERATED CODE - Review and test before production use
 # Author: AI Generated | Date: 2026-05-10
 #
-# Description: SPICE netlist parsing helper functions for numerical value
-# parsing (including SPICE/HSPICE unit suffixes) and specialized element
-# recognition (B/E/F/G/H sources, K coupling, .global directives).
+# Description: Cross-parser-shareable numeric value parsing helpers. Handles
+# SPICE-style unit suffixes (T, G, MEG, K, M, U, μ, N, P, F, A) used by SPICE,
+# Spectre, Verilog localparam evaluation, EDIF, and DSPF/SPEF numeric literals.
 #
-# Usage: from netlist_tracer.parsers.spice_helpers import parse_numerical
+# Usage: from netlist_tracer.parsers._numerics import parse_numerical
 #   Example: parse_numerical("1.5MEG") -> 1500000.0
 #
 # Changelog:
-#   2026-05-10 - Initial implementation for SPICE parsing helpers
+#   2026-05-10 - Renamed from spice_helpers.py; helpers are cross-parser-shareable
 ################################################################################
 
 from typing import Optional
 
 ################################################################################
 # SECTION: Numerical Parsing
-# Description: Parse SPICE numerical values with unit suffixes (T, G, MEG, K,
-# M, U, μ, N, P, F, A) using longest-suffix-match-first algorithm.
+# Description: Parse numeric values with unit suffixes (T, G, MEG, K, M, U, μ,
+# N, P, F, A) using longest-suffix-match-first algorithm.
 ################################################################################
 
 
 def parse_numerical(value_str: str) -> Optional[float]:
     """
-    Parse a SPICE numerical value string with optional unit suffix.
+    Parse a numeric value string with optional unit suffix.
 
     Handles HSPICE explicit and conventional unit suffixes:
     - T=1e12, G=1e9, MEG=1e6, K=1e3, M=1e-3 (milli), U=1e-6, μ=1e-6,

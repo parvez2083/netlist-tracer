@@ -163,7 +163,7 @@ def test_spice_global_directive_captured(synthetic_spice_global_directive_sp):
 
 def test_parse_numerical_meg_vs_m():
     """Test MEG (mega, 1e6) vs M (milli, 1e-3) distinction."""
-    from netlist_tracer.parsers.spice_helpers import parse_numerical
+    from netlist_tracer.parsers._numerics import parse_numerical
 
     assert parse_numerical("1MEG") == 1e6, "1MEG should be 1,000,000"
     assert parse_numerical("1M") == 1e-3, "1M should be 0.001"
@@ -173,7 +173,7 @@ def test_parse_numerical_meg_vs_m():
 
 def test_parse_numerical_all_suffixes():
     """Test all SPICE/HSPICE unit suffixes."""
-    from netlist_tracer.parsers.spice_helpers import parse_numerical
+    from netlist_tracer.parsers._numerics import parse_numerical
 
     assert parse_numerical("1T") == 1e12, "T (tera)"
     assert parse_numerical("1G") == 1e9, "G (giga)"
@@ -187,14 +187,14 @@ def test_parse_numerical_all_suffixes():
 
 def test_parse_numerical_unicode_mu():
     """Test Unicode micro symbol (μ)."""
-    from netlist_tracer.parsers.spice_helpers import parse_numerical
+    from netlist_tracer.parsers._numerics import parse_numerical
 
     assert parse_numerical("1μ") == 1e-6, "Unicode μ should be micro"
 
 
 def test_parse_numerical_case_insensitivity():
     """Test case insensitivity for all suffixes."""
-    from netlist_tracer.parsers.spice_helpers import parse_numerical
+    from netlist_tracer.parsers._numerics import parse_numerical
 
     assert parse_numerical("1K") == parse_numerical("1k"), "K/k equivalence"
     assert parse_numerical("1T") == parse_numerical("1t"), "T/t equivalence"
@@ -203,7 +203,7 @@ def test_parse_numerical_case_insensitivity():
 
 def test_parse_numerical_scientific_notation():
     """Test plain scientific notation (no suffix)."""
-    from netlist_tracer.parsers.spice_helpers import parse_numerical
+    from netlist_tracer.parsers._numerics import parse_numerical
 
     assert parse_numerical("1.5e-9") == 1.5e-9, "Scientific notation 1.5e-9"
     assert parse_numerical("2.0e6") == 2.0e6, "Scientific notation 2.0e6"
@@ -212,7 +212,7 @@ def test_parse_numerical_scientific_notation():
 
 def test_parse_numerical_plain_floats():
     """Test plain floating point numbers."""
-    from netlist_tracer.parsers.spice_helpers import parse_numerical
+    from netlist_tracer.parsers._numerics import parse_numerical
 
     assert parse_numerical("3.14") == 3.14, "Plain float 3.14"
     assert parse_numerical("0.001") == 0.001, "Plain float 0.001"
@@ -221,7 +221,7 @@ def test_parse_numerical_plain_floats():
 
 def test_parse_numerical_none_on_garbage():
     """Test None return on garbage input."""
-    from netlist_tracer.parsers.spice_helpers import parse_numerical
+    from netlist_tracer.parsers._numerics import parse_numerical
 
     assert parse_numerical("abc") is None, "Garbage 'abc' should return None"
     assert parse_numerical("12X34") is None, "Invalid '12X34' should return None"
@@ -230,7 +230,7 @@ def test_parse_numerical_none_on_garbage():
 
 def test_parse_numerical_none_on_empty_string():
     """Test None return on empty string."""
-    from netlist_tracer.parsers.spice_helpers import parse_numerical
+    from netlist_tracer.parsers._numerics import parse_numerical
 
     assert parse_numerical("") is None, "Empty string should return None"
     assert parse_numerical("   ") is None, "Whitespace-only should return None"
@@ -238,7 +238,7 @@ def test_parse_numerical_none_on_empty_string():
 
 def test_parse_numerical_none_on_non_string():
     """Test None return on non-string input."""
-    from netlist_tracer.parsers.spice_helpers import parse_numerical
+    from netlist_tracer.parsers._numerics import parse_numerical
 
     assert parse_numerical(None) is None, "None input should return None"
     assert parse_numerical(123) is None, "Integer input should return None"
