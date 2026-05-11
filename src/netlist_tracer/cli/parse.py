@@ -29,6 +29,12 @@ def main() -> int:
         default=None,
         help="Additional directory to search for include files (repeatable)",
     )
+    parser.add_argument(
+        "-format",
+        choices=["auto", "spice", "cdl", "spectre", "verilog", "edif"],
+        default="auto",
+        help="Override format auto-detection. Default: auto (content-based detection).",
+    )
     args = parser.parse_args()
 
     user_defines = set(args.defines.split(",")) if args.defines else None
@@ -38,8 +44,13 @@ def main() -> int:
         return 1
 
     try:
+        fmt = None if args.format == "auto" else args.format
         nl_parser = NetlistParser(
-            args.netlist, defines=user_defines, top=args.top, include_paths=args.include_path
+            args.netlist,
+            defines=user_defines,
+            top=args.top,
+            include_paths=args.include_path,
+            format=fmt,
         )
     except NetlistParseError as e:
         print(f"ERROR: {e}", file=sys.stderr)

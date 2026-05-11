@@ -35,6 +35,7 @@ class NetlistParser:
         top: Optional[str] = None,
         workers: int = 0,
         include_paths: Optional[list[str]] = None,
+        format: Optional[str] = None,
     ) -> None:
         """Parse a netlist source.
 
@@ -49,7 +50,17 @@ class NetlistParser:
             top: Optional top-cell name to limit hierarchy.
             workers: Parallel worker count (0 = auto).
             include_paths: Optional list of additional search directories for includes.
+            format: Override auto-detection with explicit format string.
+                Valid values: 'spice', 'cdl', 'spectre', 'verilog', 'edif', None (auto-detect).
         """
+        # Validate format parameter
+        valid_formats = {"spice", "cdl", "spectre", "verilog", "edif", None}
+        if format is not None and format not in valid_formats:
+            raise NetlistParseError(
+                f"Invalid format '{format}': must be one of "
+                f"{sorted(str(f) for f in valid_formats if f is not None)}"
+            )
+
         self.filename = filename
         self.source_path = filename
         self.tvars = dict(tvars) if tvars else {}
@@ -65,6 +76,7 @@ class NetlistParser:
         self.format = "spice"
         self.files: list[str] = []
         self.global_nets: list[str] = []
+        self._user_format = format
 
         # JSON cache: load pre-parsed data directly
         if os.path.isfile(filename) and filename.endswith(".json"):
@@ -83,12 +95,17 @@ class NetlistParser:
             if not self.files:
                 raise NetlistParseError(f"No .sv/.v/.psv files found in directory: {filename}")
             _logger.info(f"Parsing {len(self.files)} Verilog/SV files from: {filename}")
+            # Directory paths imply Verilog; format kwarg is ignored for directories
             self.format = "verilog"
             self.source_path = os.path.abspath(filename)
         else:
             self.files = [filename]
             _logger.info(f"Parsing netlist: {os.path.abspath(filename)}")
-            self.format = self._detect_format()
+            # Use explicit format if provided; otherwise auto-detect
+            if self._user_format:
+                self.format = self._user_format
+            else:
+                self.format = self._detect_format()
         self._parse()
 
     def _detect_format(self) -> str:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Optional
 
 
 def _recognize_va_module(content: str) -> bool:
@@ -26,15 +27,174 @@ def _recognize_va_module(content: str) -> bool:
     return False
 
 
-def detect_format(filepaths: list[str]) -> str:
-    """Detect netlist format from file content syntax.
+def _score_content(content: str) -> dict[str, int]:
+    """Scan content and accumulate per-format marker weights.
 
-    Distinguishing markers:
-    - EDIF:     '(edif ' prefix or .edif/.edn/.edf extension
-    - Verilog:  'module <name>' keyword
-    - Spectre:  'subckt <name>' (no dot) or 'simulator lang=spectre'
-    - CDL:      '*.PININFO' comment lines (auCdl-specific)
-    - SPICE:    '.subckt/.ends' without CDL markers
+    Scores all formats by scanning for distinguishing markers.
+    Weights reflect marker specificity: unambiguous markers (EDIF,
+    explicit Spectre directives) have higher weights than ambiguous
+    ones (.subckt could be both Spectre and SPICE-family).
+
+    Inputs:
+        content: File content (typically first 4 KB)
+
+    Outputs:
+        Dict mapping format name to accumulated score
+    """
+    scores: dict[str, int] = {"edif": 0, "verilog": 0, "spectre": 0, "cdl": 0, "spice": 0}
+
+    # EDIF: s-expression prefix is unmistakable
+    if re.search(r"\(edif\b", content):
+        scores["edif"] += 10
+
+    # Verilog-A: electrical or analog begin block
+    if _recognize_va_module(content):
+        scores["verilog"] += 5
+
+    # Verilog: module declaration
+    if re.search(r"\bmodule\s+\w+", content):
+        scores["verilog"] += 5
+
+    # Verilog: endmodule keyword
+    if re.search(r"\bendmodule\b", content):
+        scores["verilog"] += 3
+
+    # Spectre: explicit directive
+    if re.search(r"simulator\s+lang=spectre", content):
+        scores["spectre"] += 10
+
+    # Spectre: bare subckt (no dot), case-sensitive
+    if re.search(r"(?:^|\n)subckt\s+\w+", content, re.MULTILINE):
+        scores["spectre"] += 5
+
+    # CDL: auCdl-specific marker
+    if re.search(r"\*\.PININFO", content):
+        scores["cdl"] += 8
+
+    # SPICE-family: .subckt directive (case-insensitive)
+    if re.search(r"(?:^|\n)\.subckt\s+\w+", content, re.MULTILINE | re.IGNORECASE):
+        scores["spice"] += 5
+
+    # SPICE-family: .ends terminator
+    if re.search(r"(?:^|\n)\.ends\b", content, re.MULTILINE | re.IGNORECASE):
+        scores["spice"] += 2
+
+    # SPICE-family: .global directive
+    if re.search(r"(?:^|\n)\.global\b", content, re.MULTILINE | re.IGNORECASE):
+        scores["spice"] += 2
+
+    return scores
+
+
+def _extension_hint(filepath: str) -> Optional[str]:
+    """Return suggested format from file extension.
+
+    Used only as tiebreaker when content scores are tied or zero.
+
+    Inputs:
+        filepath: File path
+
+    Outputs:
+        Format name string or None if extension not recognized
+    """
+    ext_map = {
+        ".edif": "edif",
+        ".edn": "edif",
+        ".edf": "edif",
+        ".va": "verilog",
+        ".vams": "verilog",
+        ".vha": "verilog",
+        ".v": "verilog",
+        ".sv": "verilog",
+        ".psv": "verilog",
+        ".scs": "spectre",
+        ".cdl": "cdl",
+        ".sp": "spice",
+        ".spi": "spice",
+        ".cir": "spice",
+        ".ckt": "spice",
+    }
+
+    lower_path = filepath.lower()
+    for ext, fmt in ext_map.items():
+        if lower_path.endswith(ext):
+            return fmt
+
+    return None
+
+
+def _pick_format(scores: dict[str, int], ext_hint: Optional[str]) -> str:
+    """Apply tiebreaker logic to scores + extension hint.
+
+    Implements priority rules:
+    1. CDL wins if cdl score > 0 and spice score > 0 (CDL is superset)
+    2. Verilog wins if verilog >= spice (module is unambiguous)
+    3. Format with max score wins; ties use extension hint
+    4. Zero scores fall back to extension hint
+    5. Final fallback: 'spice' (legacy default)
+
+    Inputs:
+        scores: Dict from _score_content()
+        ext_hint: Format name from _extension_hint() or None
+
+    Outputs:
+        Format name string ('spice', 'cdl', 'spectre', 'verilog', 'edif')
+    """
+    # Rule 1: CDL vs SPICE tiebreaker (both have markers, CDL is superset)
+    if scores["cdl"] > 0 and scores["spice"] > 0:
+        return "cdl"
+
+    # Rule 2: Verilog vs SPICE tiebreaker (both present, module is unambiguous)
+    if scores["verilog"] > 0 and scores["spice"] > 0 and scores["verilog"] >= scores["spice"]:
+        return "verilog"
+
+    # Find maximum score
+    max_score = max(scores.values())
+
+    # Rule 3: If max score is 0, use extension hint
+    if max_score == 0:
+        if ext_hint:
+            return ext_hint
+        return "spice"
+
+    # Find all formats with max score (ties)
+    tied_formats = [fmt for fmt, score in scores.items() if score == max_score]
+
+    # Rule 4a: Single clear winner
+    if len(tied_formats) == 1:
+        return tied_formats[0]
+
+    # Rule 4b: Tie -- use extension hint if it matches one of the tied formats
+    if ext_hint and ext_hint in tied_formats:
+        return ext_hint
+
+    # Rule 4c: Tie with no matching extension hint -- pick by priority
+    priority = ["edif", "spectre", "verilog", "cdl", "spice"]
+    for fmt in priority:
+        if fmt in tied_formats:
+            return fmt
+
+    return "spice"
+
+
+def detect_format(filepaths: list[str]) -> str:
+    """Detect netlist format from file content (content-first scoring).
+
+    Reads first 4 KB of each file, accumulates per-format marker scores,
+    and applies tiebreaker logic. Extension is used as tiebreaker hint
+    only when content provides ambiguous or zero signal.
+
+    Distinguishing markers (by specificity):
+    - EDIF:     '(edif ' s-expression prefix (weight 10)
+    - Spectre:  'simulator lang=spectre' directive (weight 10)
+                bare 'subckt <name>' (weight 5)
+    - Verilog:  'module <name>' keyword (weight 5)
+                'electrical' or 'analog begin' for Verilog-A (weight 5)
+                'endmodule' keyword (weight 3)
+    - CDL:      '*.PININFO' comment line (weight 8)
+    - SPICE:    '.subckt' directive (weight 5)
+                '.ends' terminator (weight 2)
+                '.global' directive (weight 2)
 
     Args:
         filepaths: List of file paths to scan for format markers.
@@ -42,59 +202,20 @@ def detect_format(filepaths: list[str]) -> str:
     Returns:
         Format string: 'edif', 'verilog', 'spectre', 'cdl', or 'spice'.
     """
-    has_dotsubckt = False
-    has_pininfo = False
+    if not filepaths:
+        return "spice"
+
+    all_scores: dict[str, int] = {"edif": 0, "verilog": 0, "spectre": 0, "cdl": 0, "spice": 0}
 
     for filepath in filepaths:
-        # Fast path: check extension
-        lower_path = filepath.lower()
-        if lower_path.endswith((".edif", ".edn", ".edf")):
-            return "edif"
-
-        # Verilog-A: .va, .vams, .vha extensions
-        if lower_path.endswith((".va", ".vams", ".vha")):
-            return "verilog"
-
         with open(filepath) as f:
-            # Check first 4 KB for EDIF marker and Verilog-A markers
-            content_start = f.read(4096)
-            if re.search(r"\(edif\s", content_start, re.IGNORECASE):
-                return "edif"
+            content = f.read(4096)
 
-            # Check for Verilog-A content markers
-            if _recognize_va_module(content_start):
-                return "verilog"
+        scores = _score_content(content)
+        for fmt in all_scores:
+            all_scores[fmt] += scores[fmt]
 
-            f.seek(0)
+    # Use extension hint from first file (typical case: homogeneous file list)
+    ext_hint = _extension_hint(filepaths[0])
 
-            for line in f:
-                stripped = line.strip()
-                if not stripped:
-                    continue
-
-                # Verilog: 'module <name>'
-                if re.match(r"^module\s+\w+", stripped):
-                    return "verilog"
-
-                # Spectre: 'simulator lang=spectre' or bare 'subckt' (no dot)
-                if stripped.startswith("simulator lang=spectre"):
-                    return "spectre"
-                if re.match(r"^subckt\s", stripped):
-                    return "spectre"
-
-                # CDL marker: *.PININFO is auCdl-specific, never in HSPICE
-                if stripped.startswith("*.PININFO"):
-                    has_pininfo = True
-
-                # SPICE-family: .SUBCKT present
-                if re.match(r"^\.subckt\s", stripped, re.IGNORECASE):
-                    has_dotsubckt = True
-
-                # Early exit once we have enough info
-                if has_dotsubckt and has_pininfo:
-                    return "cdl"
-
-    if has_dotsubckt:
-        return "cdl" if has_pininfo else "spice"
-
-    return "spice"
+    return _pick_format(all_scores, ext_hint)

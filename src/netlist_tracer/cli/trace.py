@@ -64,6 +64,12 @@ def main() -> int:
         default=None,
         help="Additional directory to search for include files (repeatable)",
     )
+    parser.add_argument(
+        "-format",
+        choices=["auto", "spice", "cdl", "spectre", "verilog", "edif"],
+        default="auto",
+        help="Override format auto-detection. Default: auto.",
+    )
     args = parser.parse_args()
 
     # Set logging level for JSON output
@@ -95,10 +101,12 @@ def main() -> int:
         return 1
 
     try:
+        fmt = None if args.format == "auto" else args.format
         nl_parser = NetlistParser(
             netlist_file,
             defines=user_defines if user_defines else None,
             include_paths=args.include_path,
+            format=fmt,
         )
     except NetlistParseError as e:
         print(f"ERROR: {e}")
