@@ -219,3 +219,32 @@ def detect_format(filepaths: list[str]) -> str:
     ext_hint = _extension_hint(filepaths[0])
 
     return _pick_format(all_scores, ext_hint)
+
+
+def detect_format_per_file(filepaths: list[str]) -> dict[str, list[str]]:
+    """Detect format of each file individually and group by detected format.
+
+    Runs detect_format() on each file individually, grouping results by
+    detected format. Files within each group are sorted alphabetically for
+    stable iteration order in downstream merge operations.
+
+    Args:
+        filepaths: List of file paths to detect. Must be non-empty.
+
+    Returns:
+        Dict mapping format string to sorted list of file paths:
+        {'spice': [...], 'verilog': [...], ...}
+    """
+    frmt_grps: dict[str, list[str]] = {}
+
+    for filepath in filepaths:
+        frmt = detect_format([filepath])
+        if frmt not in frmt_grps:
+            frmt_grps[frmt] = []
+        frmt_grps[frmt].append(filepath)
+
+    # Sort file lists alphabetically within each format group
+    for frmt in frmt_grps:
+        frmt_grps[frmt].sort()
+
+    return frmt_grps

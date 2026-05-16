@@ -10,7 +10,7 @@ from typing import Optional
 from netlist_tracer._logging import get_logger
 from netlist_tracer.exceptions import NetlistParseError
 from netlist_tracer.model import Instance, SubcktDef, merge_aliases_into_subckt
-from netlist_tracer.parsers.detect import detect_format
+from netlist_tracer.parsers.detect import detect_format, detect_format_per_file
 from netlist_tracer.parsers.edif import parse_edif
 from netlist_tracer.parsers.spectre import parse_spectre
 from netlist_tracer.parsers.spice import parse_spice
@@ -21,6 +21,16 @@ from netlist_tracer.parsers.verilog.specialize import _sv_assemble, _sv_speciali
 _logger = get_logger(__name__)
 
 _CACHE_SCHEMA_VERSION = 2
+
+# Format priority ranking for collision resolution (higher = wins on name conflict)
+_FORMAT_PRIORITY = {
+    "spf": 5,
+    "spectre": 4,
+    "cdl": 3,
+    "spice": 2,
+    "verilog": 1,
+    "edif": 0,
+}
 
 
 class NetlistParser:
@@ -83,20 +93,62 @@ class NetlistParser:
             self._load_json(filename)
             return
 
-        # Directory path: full SV elaboration
+        # Directory path: detect all netlist files
         if os.path.isdir(filename):
             self.files = []
-            for ext in ("psv", "sv", "v", "va", "vams", "vha"):
+            # Glob all netlist formats to support mixed-format directories
+            for ext in (
+                "psv",
+                "sv",
+                "v",
+                "va",
+                "vams",
+                "vha",
+                "sp",
+                "spi",
+                "cir",
+                "ckt",
+                "scs",
+                "cdl",
+                "edif",
+                "edn",
+                "edf",
+            ):
                 self.files.extend(
                     glob.glob(os.path.join(filename, "**", f"*.{ext}"), recursive=True)
                 )
                 self.files.extend(glob.glob(os.path.join(filename, f"*.{ext}")))
             self.files = sorted(set(self.files))
             if not self.files:
-                raise NetlistParseError(f"No .sv/.v/.psv files found in directory: {filename}")
-            _logger.info(f"Parsing {len(self.files)} Verilog/SV files from: {filename}")
-            # Directory paths imply Verilog; format kwarg is ignored for directories
-            self.format = "verilog"
+                raise NetlistParseError(f"No netlist files found in directory: {filename}")
+            _logger.info(f"Parsing {len(self.files)} netlist files from: {filename}")
+            # Directory paths default to verilog if only Verilog files present;
+            # format kwarg is ignored for directories
+            # Detection happens in _parse() based on actual file contents
+            if not format:
+                # Auto-detect format from files
+                verilog_exts = {"psv", "sv", "v", "va", "vams", "vha"}
+                has_verilog = any(
+                    f.endswith(tuple(f".{ext}" for ext in verilog_exts)) for f in self.files
+                )
+                has_other = any(
+                    not f.endswith(tuple(f".{ext}" for ext in verilog_exts)) for f in self.files
+                )
+                if has_verilog and not has_other:
+                    # Verilog-only directory: use existing behavior
+                    self.format = "verilog"
+                    filtered_files = [
+                        f
+                        for f in self.files
+                        if f.endswith(tuple(f".{ext}" for ext in verilog_exts))
+                    ]
+                    self.files = sorted(filtered_files)
+                else:
+                    # Mixed or non-Verilog directory: will detect per-file in _parse()
+                    self.format = "mixed"
+            else:
+                # User override: format is already set
+                self.format = format
             self.source_path = os.path.abspath(filename)
         else:
             self.files = [filename]
@@ -112,16 +164,234 @@ class NetlistParser:
         """Detect netlist format from file content."""
         return detect_format(self.files)
 
-    def _parse(self) -> None:
-        """Dispatch to format-specific parser."""
-        if self.format == "verilog":
-            self._parse_verilog()
-        elif self.format == "edif":
-            self._parse_edif()
-        elif self.format == "spectre":
-            self._parse_spectre()
+    def _dispatch_single_format(
+        self, format: str, files: list[str]
+    ) -> tuple[dict[str, SubcktDef], list[Instance], list[str]]:
+        """Dispatch to format-specific parser and return results without mutation.
+
+        Routes to the appropriate parser for one format and returns
+        (subckts, instances, global_nets) tuple. Verilog handles multiple
+        files; SPICE/CDL/Spectre/EDIF expect exactly one file per group.
+
+        Args:
+            format: Format name ('verilog', 'spice', 'cdl', 'spectre', 'edif')
+            files: Files for this format
+
+        Returns:
+            Tuple of (subckts dict, instances list, global_nets list)
+
+        Raises:
+            NetlistParseError if SPICE/CDL/Spectre/EDIF group has >1 files
+        """
+        if format == "verilog":
+            # Verilog parser handles multiple files via existing pipeline
+            # Run the pipeline and extract results
+            sbckts, insts = self._verilog_parse_group(files)
+            return sbckts, insts, []
+
+        elif format == "edif":
+            if len(files) != 1:
+                raise NetlistParseError(
+                    f"edif parser expects exactly one file in group; got {len(files)} files: {files}"
+                )
+            sbckts, insts, gbl_nets = self._parse_edif(files[0])
+            return sbckts, insts, gbl_nets
+
+        elif format == "spectre":
+            if len(files) != 1:
+                raise NetlistParseError(
+                    f"spectre parser expects exactly one file in group; got {len(files)} files: {files}"
+                )
+            sbckts, insts, gbl_nets = self._parse_spectre(files[0])
+            return sbckts, insts, gbl_nets
+
+        else:  # spice, cdl, or unknown defaults to spice
+            if len(files) != 1:
+                raise NetlistParseError(
+                    f"spice parser expects exactly one file in group; got {len(files)} files: {files}"
+                )
+            sbckts, insts, gbl_nets = self._parse_spice(files[0])
+            return sbckts, insts, gbl_nets
+
+    def _verilog_parse_group(self, fls: list[str]) -> tuple[dict[str, SubcktDef], list[Instance]]:
+        """Run Verilog elaboration pipeline on a group of files.
+
+        Returns (subckts, instances) without mutating self. Used by
+        _dispatch_single_format for per-format Verilog groups.
+
+        Args:
+            fls: List of Verilog files
+
+        Returns:
+            Tuple of (subckts dict, instances list)
+        """
+        # Discover headers if this is a directory scan
+        if os.path.isdir(self.filename):
+            header_files = _sv_discover_headers(self.filename)
+            if header_files:
+                disc_defs, disc_vals = _sv_parse_defines(header_files, self.tvars)
+                defs = self.defines | disc_defs
+                define_vals = dict(self.define_values) if self.define_values else {}
+                for k, v in disc_vals.items():
+                    define_vals.setdefault(k, v)
+            else:
+                defs = self.defines
+                define_vals = dict(self.define_values) if self.define_values else {}
         else:
-            self._parse_spice()
+            defs = self.defines
+            define_vals = dict(self.define_values) if self.define_values else {}
+
+        # Parse files
+        work = [(f, self.tvars, defs, define_vals) for f in fls]
+        nw = self.workers or min(cpu_count(), len(fls), 16)
+        if nw > 1 and len(fls) > 4:
+            from multiprocessing import Pool
+
+            with Pool(nw) as pool:
+                results = pool.map(_sv_parse_file, work)
+        else:
+            results = [_sv_parse_file(w) for w in work]
+        all_mods = [m for batch in results for m in batch]
+
+        if not all_mods:
+            raise NetlistParseError("No modules parsed from Verilog files")
+
+        # Specialize and assemble
+        n_spec = _sv_specialize_modules(all_mods, define_vals)
+        if n_spec:
+            _logger.info(f"Specialized: {n_spec} new subckt variants")
+
+        sbckts, instances_dicts = _sv_assemble(all_mods, top=self.top, define_values=define_vals)
+
+        # Convert instances from dicts to Instance objects
+        insts: list[Instance] = []
+        for inst_dict in instances_dicts:
+            insts.append(
+                Instance(
+                    name=inst_dict["name"],
+                    cell_type=inst_dict["cell_type"],
+                    nets=inst_dict["nets"],
+                    parent_cell=inst_dict["parent_cell"],
+                )
+            )
+
+        return sbckts, insts
+
+    def _merge_format_results(
+        self, per_fmt_rslt: dict[str, tuple[dict[str, SubcktDef], list[Instance], list[str]]]
+    ) -> None:
+        """Merge per-format parser outputs into self, applying format-priority collision policy.
+
+        Iterates formats in descending _FORMAT_PRIORITY rank order. For each
+        subckt name, first format to define it wins; subsequent definitions
+        logged as WARNING and dropped. Instances always merged. global_nets
+        concatenated and deduplicated.
+
+        Args:
+            per_fmt_rslt: Dict mapping format to (subckts, instances, global_nets) tuple
+        """
+        mrgd_sbckts: dict[str, SubcktDef] = {}
+        all_insts: list[Instance] = []
+        all_gbl_nets: list[str] = []
+
+        # Sort formats by priority (highest first)
+        sorted_fmts = sorted(
+            per_fmt_rslt.keys(), key=lambda f: _FORMAT_PRIORITY.get(f, -1), reverse=True
+        )
+
+        for fmt in sorted_fmts:
+            sbckts, insts, gbl_nets = per_fmt_rslt[fmt]
+
+            # Merge subckts with collision detection
+            for name, sub in sbckts.items():
+                if name in mrgd_sbckts:
+                    # Collision: first (highest priority) wins; log warning
+                    winner_fmt = None
+                    for check_fmt in sorted_fmts:
+                        if check_fmt == fmt:
+                            break
+                        if name in per_fmt_rslt[check_fmt][0]:
+                            winner_fmt = check_fmt
+                            break
+                    if winner_fmt:
+                        _logger.warning(
+                            f"Subckt '{name}' defined in both {winner_fmt} and {fmt}; "
+                            f"keeping {winner_fmt} definition (priority {_FORMAT_PRIORITY.get(winner_fmt, -1)} > {_FORMAT_PRIORITY.get(fmt, -1)})"
+                        )
+                else:
+                    mrgd_sbckts[name] = sub
+
+            # Always merge instances
+            all_insts.extend(insts)
+
+            # Collect global nets
+            all_gbl_nets.extend(gbl_nets)
+
+        # Deduplicate global nets while preserving order
+        seen = set()
+        dupe_gbl_nets = []
+        for net in all_gbl_nets:
+            if net not in seen:
+                seen.add(net)
+                dupe_gbl_nets.append(net)
+
+        self.subckts = mrgd_sbckts
+        self.global_nets = dupe_gbl_nets
+        for inst in all_insts:
+            self._add_instance(inst)
+
+    def _parse(self) -> None:
+        """Dispatch to format-specific parser(s).
+
+        Decision tree (3 cases):
+        1. If self.format == 'mixed' (mixed-format directory pre-detected in __init__): per-file dispatch + merge
+        2. Elif format is pre-pinned (user override or directory Verilog): single format dispatch
+        3. Elif single file: detect format + single dispatch
+
+        Note: __init__ pre-pins directories as either "verilog" (verilog-only)
+        or "mixed" (mixed/non-verilog), so only cases 1–3 are reachable.
+        """
+        # Case 1: Mixed-format directory (pre-detected in __init__)
+        if self.format == "mixed":
+            frmt_grps = detect_format_per_file(self.files)
+            grps_str = ", ".join(f"{fmt}({len(fls)})" for fmt, fls in sorted(frmt_grps.items()))
+            _logger.info(f"Detected mixed-format directory with groups: {grps_str}")
+
+            per_fmt_rslt: dict[str, tuple[dict[str, SubcktDef], list[Instance], list[str]]] = {}
+            for fmt, fls in frmt_grps.items():
+                sbckts, insts, gbl_nets = self._dispatch_single_format(fmt, fls)
+                per_fmt_rslt[fmt] = (sbckts, insts, gbl_nets)
+
+            self._merge_format_results(per_fmt_rslt)
+            return
+
+        # Case 2 & 3: Single format (pre-pinned or single file)
+        if (
+            self._user_format
+            or (len(self.files) > 1 and self.format == "verilog")
+            or len(self.files) == 1
+        ):
+            if self.format == "verilog":
+                self._parse_verilog()
+            elif self.format == "edif":
+                sbckts, insts, gbl_nets = self._dispatch_single_format("edif", self.files)
+                self.subckts = sbckts
+                self.global_nets = gbl_nets
+                for inst in insts:
+                    self._add_instance(inst)
+            elif self.format == "spectre":
+                sbckts, insts, gbl_nets = self._dispatch_single_format("spectre", self.files)
+                self.subckts = sbckts
+                self.global_nets = gbl_nets
+                for inst in insts:
+                    self._add_instance(inst)
+            else:  # spice, cdl, unknown
+                sbckts, insts, gbl_nets = self._dispatch_single_format("spice", self.files)
+                self.subckts = sbckts
+                self.global_nets = gbl_nets
+                for inst in insts:
+                    self._add_instance(inst)
+            return
 
     def _add_instance(self, instance: Instance) -> None:
         """Register an instance in all lookup indices."""
@@ -183,35 +453,43 @@ class NetlistParser:
                 )
             )
 
-    def _parse_spice(self) -> None:
-        """Parse SPICE/CDL netlist."""
-        if len(self.files) != 1:
-            raise NetlistParseError("SPICE parser expects exactly one file")
-        subckts, instances, global_nets = parse_spice(
-            self.files[0], include_paths=self.include_paths
-        )
-        self.subckts = subckts
-        self.global_nets = global_nets
-        for inst in instances:
-            self._add_instance(inst)
+    def _parse_spice(self, filepath: str) -> tuple[dict[str, SubcktDef], list[Instance], list[str]]:
+        """Parse SPICE/CDL netlist and return results without mutation.
 
-    def _parse_edif(self) -> None:
-        """Parse EDIF netlist."""
-        if len(self.files) != 1:
-            raise NetlistParseError("EDIF parser expects exactly one file")
-        subckts, instances = parse_edif(self.files[0])
-        self.subckts = subckts
-        for inst in instances:
-            self._add_instance(inst)
+        Args:
+            filepath: Path to SPICE/CDL file
 
-    def _parse_spectre(self) -> None:
-        """Parse Spectre netlist."""
-        if len(self.files) != 1:
-            raise NetlistParseError("Spectre parser expects exactly one file")
-        subckts, instances = parse_spectre(self.files[0], include_paths=self.include_paths)
-        self.subckts = subckts
-        for inst in instances:
-            self._add_instance(inst)
+        Returns:
+            Tuple of (subckts dict, instances list, global_nets list)
+        """
+        subckts, instances, global_nets = parse_spice(filepath, include_paths=self.include_paths)
+        return subckts, instances, global_nets
+
+    def _parse_edif(self, filepath: str) -> tuple[dict[str, SubcktDef], list[Instance], list[str]]:
+        """Parse EDIF netlist and return results without mutation.
+
+        Args:
+            filepath: Path to EDIF file
+
+        Returns:
+            Tuple of (subckts dict, instances list, empty global_nets list)
+        """
+        subckts, instances = parse_edif(filepath)
+        return subckts, instances, []
+
+    def _parse_spectre(
+        self, filepath: str
+    ) -> tuple[dict[str, SubcktDef], list[Instance], list[str]]:
+        """Parse Spectre netlist and return results without mutation.
+
+        Args:
+            filepath: Path to Spectre file
+
+        Returns:
+            Tuple of (subckts dict, instances list, empty global_nets list)
+        """
+        subckts, instances = parse_spectre(filepath, include_paths=self.include_paths)
+        return subckts, instances, []
 
     def _parse_verilog(self) -> None:
         """Full SV elaboration pipeline."""
