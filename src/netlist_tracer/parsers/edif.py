@@ -25,7 +25,7 @@ def parse_edif(filename: str) -> tuple[dict[str, SubcktDef], list[Instance]]:
     Raises:
         NetlistParseError: On malformed s-expression or unsupported construct.
     """
-    with open(filename) as f:
+    with open(filename, encoding="utf-8", errors="replace") as f:
         text = f.read()
 
     tokens = _tokenize(text)

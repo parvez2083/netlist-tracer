@@ -234,7 +234,7 @@ def detect_format(filepaths: list[str]) -> str:
             with gzip.open(filepath, "rt", encoding="utf-8", errors="replace") as f:
                 content = f.read(4096)
         else:
-            with open(filepath) as f:
+            with open(filepath, encoding="utf-8", errors="replace") as f:
                 content = f.read(4096)
 
         scores = _score_content(content)

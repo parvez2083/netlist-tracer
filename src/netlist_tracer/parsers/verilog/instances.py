@@ -10,6 +10,7 @@ from netlist_tracer.parsers.verilog.preprocess import (
 )
 from netlist_tracer.parsers.verilog.structure import (
     _PRIMITIVES,
+    _parse_interface_definition,
     _sv_extract_alias_pairs,
     _sv_extract_instances,
     _sv_extract_wire_widths_1d,
@@ -25,7 +26,9 @@ _logger = get_logger(__name__)
 
 # Pre-compiled patterns
 _RE_MODULE = re.compile(r"\bmodule\s+(\w+)")
+_RE_INTERFACE = re.compile(r"\binterface\s+(\w+)")
 _RE_ENDMOD = re.compile(r"\bendmodule\b")
+_RE_ENDINTERFACE = re.compile(r"\bendinterface\b")
 _RE_DEFPARAM = re.compile(r"\bdefparam\s+([\w\.]+)\.(\w+)\s*=\s*([^;]+);")
 
 
@@ -198,84 +201,158 @@ def _sv_parse_file(args: tuple[str, dict, set, dict]) -> list:
     modules = []
     pos = 0
     while True:
+        # Find next module or interface definition
         mm = _RE_MODULE.search(raw, pos)
-        if not mm:
+        im = _RE_INTERFACE.search(raw, pos)
+
+        # Determine which comes first
+        if mm and im:
+            if mm.start() < im.start():
+                next_match = mm
+                is_interface = False
+            else:
+                next_match = im
+                is_interface = True
+        elif mm:
+            next_match = mm
+            is_interface = False
+        elif im:
+            next_match = im
+            is_interface = True
+        else:
             break
-        mod_name = mm.group(1)
-        paren_open = raw.find("(", mm.end())
-        semi = raw.find(";", mm.end())
-        if paren_open < 0 or (0 <= semi < paren_open):
-            pos = max(semi + 1, mm.end())
-            continue
-        param_text = ""
-        between = raw[mm.end() : paren_open].strip()
-        if between.startswith("#"):
-            param_close = _sv_match_paren(raw, paren_open + 1)
-            if param_close < 0:
-                pos = mm.end()
+
+        if is_interface:
+            # Interface parsing
+            intrfc_nm = next_match.group(1)
+            paren_opn = raw.find("(", next_match.end())
+            semi = raw.find(";", next_match.end())
+
+            # Interfaces can have optional port lists: interface name #(...) (ports) ; body endinterface
+            # or just: interface name ; body endinterface
+            port_cls = -1
+
+            if paren_opn >= 0 and (semi < 0 or paren_opn < semi):
+                # There's a paren before the semicolon - it's a port list
+                btwn = raw[next_match.end() : paren_opn].strip()
+                if btwn.startswith("#"):
+                    # Has parameters: interface name #(...) (ports)
+                    param_cls = _sv_match_paren(raw, paren_opn + 1)
+                    if param_cls < 0:
+                        pos = next_match.end()
+                        continue
+                    paren_opn = raw.find("(", param_cls + 1)
+                    if paren_opn < 0:
+                        # No port list after parameters
+                        hdr = raw[next_match.end() : param_cls + 1]
+                        port_cls = param_cls
+                    else:
+                        port_cls = _sv_match_paren(raw, paren_opn + 1)
+                        if port_cls < 0:
+                            pos = next_match.end()
+                            continue
+                        hdr = raw[next_match.end() : port_cls + 1]
+                else:
+                    # No parameters, just port list
+                    port_cls = _sv_match_paren(raw, paren_opn + 1)
+                    if port_cls < 0:
+                        pos = next_match.end()
+                        continue
+                    hdr = raw[next_match.end() : port_cls + 1]
+            else:
+                # No port list at all: interface name ;
+                if semi < 0:
+                    pos = next_match.end()
+                    continue
+                hdr = raw[next_match.end() : semi]
+                port_cls = semi
+
+            eim = _RE_ENDINTERFACE.search(raw, port_cls + 1)
+            bdy_end = eim.start() if eim else len(raw)
+            end_pos = eim.end() if eim else len(raw)
+            bdy = raw[port_cls + 1 : bdy_end]
+            intrfc_dcts = _parse_interface_definition(intrfc_nm, hdr, bdy, defines, define_values)
+            modules.extend(intrfc_dcts)
+            pos = end_pos
+        else:
+            # Module parsing
+            mod_name = next_match.group(1)
+            paren_open = raw.find("(", next_match.end())
+            semi = raw.find(";", next_match.end())
+            if paren_open < 0 or (0 <= semi < paren_open):
+                pos = max(semi + 1, next_match.end())
                 continue
-            param_text = raw[paren_open + 1 : param_close]
-            paren_open = raw.find("(", param_close + 1)
-            if paren_open < 0:
-                pos = mm.end()
+            param_text = ""
+            between = raw[next_match.end() : paren_open].strip()
+            if between.startswith("#"):
+                param_close = _sv_match_paren(raw, paren_open + 1)
+                if param_close < 0:
+                    pos = next_match.end()
+                    continue
+                param_text = raw[paren_open + 1 : param_close]
+                paren_open = raw.find("(", param_close + 1)
+                if paren_open < 0:
+                    pos = next_match.end()
+                    continue
+            port_close = _sv_match_paren(raw, paren_open + 1)
+            if port_close < 0:
+                pos = next_match.end()
                 continue
-        port_close = _sv_match_paren(raw, paren_open + 1)
-        if port_close < 0:
-            pos = mm.end()
-            continue
-        ports = _sv_parse_ports(raw[paren_open + 1 : port_close], define_values)
-        insts = []
-        em = _RE_ENDMOD.search(raw, port_close)
-        body_end = em.start() if em else len(raw)
-        end_pos = em.end() if em else len(raw)
-        body = raw[port_close + 1 : body_end]
-        if param_text:
-            body = param_text + "\n" + body
-        # Collect defparam overrides first
-        defparam_ovr = _sv_collect_defparam_overrides(body)
-        raw_instances = []
-        for iname, ctype, pmap, ovr in _sv_extract_instances(body, define_values):
-            # Merge defparam overrides (defparam wins over inline #())
-            if iname in defparam_ovr:
-                ovr = {**ovr, **defparam_ovr[iname]}
-            raw_instances.append({"n": iname, "c": ctype, "p": pmap, "o": ovr})
+            ports = _sv_parse_ports(raw[paren_open + 1 : port_close], define_values)
+            insts = []
+            em = _RE_ENDMOD.search(raw, port_close)
+            body_end = em.start() if em else len(raw)
+            end_pos = em.end() if em else len(raw)
+            body = raw[port_close + 1 : body_end]
+            if param_text:
+                body = param_text + "\n" + body
+            # Collect defparam overrides first
+            defparam_ovr = _sv_collect_defparam_overrides(body)
+            raw_instances = []
+            for iname, ctype, pmap, ovr in _sv_extract_instances(body, define_values):
+                # Merge defparam overrides (defparam wins over inline #())
+                if iname in defparam_ovr:
+                    ovr = {**ovr, **defparam_ovr[iname]}
+                raw_instances.append({"n": iname, "c": ctype, "p": pmap, "o": ovr})
 
-        # Synthesize primitive modules and update instance cell_types
-        insts, syn_prim_modules = _sv_synthesize_primitive_modules(
-            raw_instances, _get_primitive_types()
-        )
-        modules.extend(syn_prim_modules)
-        param_names = []
-        if param_text:
-            for pm in re.finditer(r"\bparameter\s+(?:\w+\s+)?(\w+)\s*=", param_text):
-                param_names.append(pm.group(1))
-        wires_2d = _sv_extract_wires_2d(body, define_values)
-        port_2d = _sv_extract_wires_2d(raw[paren_open + 1 : port_close], define_values)
-        wires_2d.update(port_2d)
-        wire_widths_1d = _sv_extract_wire_widths_1d(body, define_values)
-        port_widths_1d = _sv_extract_wire_widths_1d(raw[paren_open + 1 : port_close], define_values)
-        wire_widths_1d.update(port_widths_1d)
+            # Synthesize primitive modules and update instance cell_types
+            insts, syn_prim_modules = _sv_synthesize_primitive_modules(
+                raw_instances, _get_primitive_types()
+            )
+            modules.extend(syn_prim_modules)
+            param_names = []
+            if param_text:
+                for pm in re.finditer(r"\bparameter\s+(?:\w+\s+)?(\w+)\s*=", param_text):
+                    param_names.append(pm.group(1))
+            wires_2d = _sv_extract_wires_2d(body, define_values)
+            port_2d = _sv_extract_wires_2d(raw[paren_open + 1 : port_close], define_values)
+            wires_2d.update(port_2d)
+            wire_widths_1d = _sv_extract_wire_widths_1d(body, define_values)
+            port_widths_1d = _sv_extract_wire_widths_1d(
+                raw[paren_open + 1 : port_close], define_values
+            )
+            wire_widths_1d.update(port_widths_1d)
 
-        # Non-ANSI port-style fix: when the port list is just bare names,
-        # expand any bare-name port whose width is now known from the body decls.
-        for idx, p in enumerate(ports):
-            if isinstance(p, dict) and p.get("hi") is None and p.get("lo") is None:
-                name = p["name"]
-                w = wire_widths_1d.get(name) or wires_2d.get(name)
-                if w and w > 1:
-                    ports[idx] = _sv_make_port_entry(name, w - 1, 0)
+            # Non-ANSI port-style fix: when the port list is just bare names,
+            # expand any bare-name port whose width is now known from the body decls.
+            for idx, p in enumerate(ports):
+                if isinstance(p, dict) and p.get("hi") is None and p.get("lo") is None:
+                    name = p["name"]
+                    w = wire_widths_1d.get(name) or wires_2d.get(name)
+                    if w and w > 1:
+                        ports[idx] = _sv_make_port_entry(name, w - 1, 0)
 
-        aliases = _sv_extract_alias_pairs(body, define_values, wire_widths_1d, wires_2d)
-        modules.append(
-            {
-                "name": mod_name,
-                "ports": ports,
-                "insts": insts,
-                "body": body if param_names else "",
-                "param_names": param_names,
-                "wires_2d": wires_2d,
-                "aliases": aliases,
-            }
-        )
-        pos = end_pos
+            aliases = _sv_extract_alias_pairs(body, define_values, wire_widths_1d, wires_2d)
+            modules.append(
+                {
+                    "name": mod_name,
+                    "ports": ports,
+                    "insts": insts,
+                    "body": body if param_names else "",
+                    "param_names": param_names,
+                    "wires_2d": wires_2d,
+                    "aliases": aliases,
+                }
+            )
+            pos = end_pos
     return modules

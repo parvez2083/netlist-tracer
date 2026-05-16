@@ -1163,3 +1163,199 @@ def _sv_extract_instances(
         last = block_end
     instances.extend(_sv_extract_instances_flat(body[last:], prefix))
     return instances
+
+
+def _extract_modport(intrfc_nm: str, mport_txt: str, intrfc_pins: list[dict]) -> dict:
+    """
+    Parse one modport block and return a module-dict record for it.
+
+    Inputs:
+        intrfc_nm: Parent interface name
+        mport_txt: The matched modport text: 'modport <name> (<direction-tagged signal list>)'
+        intrfc_pins: Full port entry list of parent interface (used to expand bus signals to bit-level keys)
+
+    Outputs:
+        Module-dict with name='<interface>__mp_<modport>', pins (subset of interface_pins in modport order),
+        params['_kind']='modport', params['_parent_interface']=<interface>, params['_pin_directions']={pin: direction}
+    """
+    # Parse modport name and body: modport name (direction sig1, sig2, ...)
+    m = re.match(r"modport\s+(\w+)\s*\((.*)\)", mport_txt, re.DOTALL)
+    if not m:
+        return None
+
+    mport_nm = m.group(1)
+    drctn_blk = m.group(2).strip()
+
+    # Build a map from base signal name to port entry for quick lookup
+    pin_map = {p["name"]: p for p in intrfc_pins}
+
+    # Parse direction-tagged signal list
+    mport_pins = []
+    pin_drctn = {}
+
+    # Split by direction keywords; track current direction
+    crrnt_drctn = None
+
+    # Split on direction keywords while tracking scope
+    parts = re.split(r"\b(input|output|inout|clocking|import|export)\b", drctn_blk)
+
+    i = 0
+    while i < len(parts):
+        part = parts[i].strip()
+        if not part:
+            i += 1
+            continue
+
+        if part in ("input", "output", "inout"):
+            crrnt_drctn = part
+            i += 1
+        elif part in ("clocking", "import", "export"):
+            # Skip these constructs entirely
+            crrnt_drctn = None
+            i += 1
+        else:
+            # Parse signal list under current direction
+            if crrnt_drctn:
+                # Split by comma and semicolon
+                sgnls = re.split(r"[,;]", part)
+                for sgn in sgnls:
+                    sgn = sgn.strip()
+                    if sgn and not re.search(r"\b(task|function)\b", sgn):
+                        # Remove array notation and extract base signal name
+                        base_nm = re.sub(r"\[[^\]]*\]", "", sgn).strip()
+                        if base_nm and re.match(r"^[A-Za-z_]\w*$", base_nm):
+                            # Expand signal: if it refers to a bus in parent interface, use bit-level keys
+                            if base_nm in pin_map:
+                                port_ent = pin_map[base_nm]
+                                # Use bits field if available (contains expanded names like data[7], data[0])
+                                if "bits" in port_ent and port_ent["bits"]:
+                                    for bit_nm in port_ent["bits"]:
+                                        mport_pins.append(bit_nm)
+                                        pin_drctn[bit_nm] = crrnt_drctn
+                                else:
+                                    # Scalar signal: use name as-is
+                                    mport_pins.append(base_nm)
+                                    pin_drctn[base_nm] = crrnt_drctn
+                            else:
+                                # Signal not in parent interface (unusual but tolerate)
+                                mport_pins.append(sgn)
+                                pin_drctn[sgn] = crrnt_drctn
+            i += 1
+
+    # Create modport module-dict
+    mport_dict_nm = f"{intrfc_nm}__mp_{mport_nm}"
+    return {
+        "name": mport_dict_nm,
+        "ports": [{"name": p, "bits": [p], "hi": None, "lo": None} for p in mport_pins],
+        "insts": [],
+        "body": "",
+        "param_names": [],
+        "wires_2d": {},
+        "aliases": [],
+        "params": {
+            "_kind": "modport",
+            "_parent_interface": intrfc_nm,
+            "_pin_directions": pin_drctn,
+        },
+    }
+
+
+def _parse_interface_definition(
+    nm: str, hdr: str, bdy: str, dfns: set[str], dfn_vals: dict[str, int]
+) -> list[dict]:
+    """
+    Parse one interface block and return a list of module-dict records: one for the interface
+    itself, plus one per modport.
+
+    Inputs:
+        nm: Interface name (already extracted from opener)
+        hdr: Text from 'interface name' through the opening ';' (contains optional #(params) and (port_list))
+        bdy: Text between header and 'endinterface'
+        dfns: Active preprocessor defines
+        dfn_vals: Numeric values for defines
+
+    Outputs:
+        List of module-dict records. First entry is the interface itself; subsequent entries are modports.
+    """
+    # Parse interface header similarly to module header
+    # Extract parameters if present: interface name #(...) (...)
+    # We need to find the LAST parenthesis pair which contains the ports
+    intrfc_pts = []
+
+    # Find all parenthesis pairs
+    paren_opn_idx = -1
+    paren_cls_idx = -1
+    depth = 0
+    last_paren_opn = -1
+    last_paren_cls = -1
+
+    for i, ch in enumerate(hdr):
+        if ch == "(":
+            if depth == 0:
+                last_paren_opn = i
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                last_paren_cls = i
+                # Save the outermost pair that closes
+                paren_opn_idx = last_paren_opn
+                paren_cls_idx = last_paren_cls
+
+    if paren_opn_idx >= 0 and paren_cls_idx >= 0 and paren_cls_idx > paren_opn_idx:
+        intrfc_pts = _sv_parse_ports(hdr[paren_opn_idx + 1 : paren_cls_idx], dfn_vals)
+
+    # Extract port declarations from body as interface pins
+    bdy_wires = _sv_extract_wire_widths_1d(bdy, dfn_vals)
+
+    # Collect all signals as pins (ports + declarations in body)
+    all_pins = intrfc_pts.copy()
+
+    # Add signals from body declarations (buses)
+    for sgn_nm, wdth in bdy_wires.items():
+        # Check if already in ports
+        if not any(p["name"] == sgn_nm for p in all_pins):
+            if wdth > 1:
+                all_pins.append(_sv_make_port_entry(sgn_nm, wdth - 1, 0))
+            else:
+                all_pins.append(_sv_make_port_entry(sgn_nm))
+
+    # Extract scalar signal declarations (logic, wire, reg without explicit bus notation)
+    scalar_re = re.compile(
+        r"\b(?:logic|wire|reg|bit|bit_vector|parameter|localparam)\s+(?:\w+\s+)?(\w+)(?:\s*[,;=]|(?:\s*\[\s*[^\]]*\]\s*)*\s*[,;=])"
+    )
+    found_scalars = set(bdy_wires.keys()) | {p["name"] for p in all_pins}
+    for m in scalar_re.finditer(bdy):
+        sgn_nm = m.group(1)
+        if sgn_nm not in found_scalars and not re.match(r"^[A-Z_]\w*$", sgn_nm):
+            # Don't add parameters or macro names
+            if re.match(r"^[a-z_]\w*$", sgn_nm):
+                all_pins.append(_sv_make_port_entry(sgn_nm))
+                found_scalars.add(sgn_nm)
+
+    # Extract modports from body
+    mports = []
+    mport_nms = []
+    for mport_m in re.finditer(r"modport\s+(\w+)\s*\([^)]*\)", bdy, re.DOTALL):
+        mport_txt = mport_m.group(0)
+        mport_nm_match = re.match(r"modport\s+(\w+)", mport_txt)
+        if mport_nm_match:
+            mport_nm = mport_nm_match.group(1)
+            mport_nms.append(mport_nm)
+            mport_dct = _extract_modport(nm, mport_txt, all_pins)
+            if mport_dct:
+                mports.append(mport_dct)
+
+    # Build interface module-dict
+    intrfc_dct = {
+        "name": nm,
+        "ports": all_pins,
+        "insts": [],
+        "body": "",
+        "param_names": [],
+        "wires_2d": {},
+        "aliases": [],
+        "params": {"_kind": "interface", "_modports": mport_nms},
+    }
+
+    return [intrfc_dct] + mports

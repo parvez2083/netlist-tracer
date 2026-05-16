@@ -228,15 +228,20 @@ def _sv_assemble(
     # Convert subckts to SubcktDef objects
     subckts_out = {}
     for name, pins_list in subckts_flat.items():
-        sub = SubcktDef(name=name, pins=pins_list)
-        # Merge aliases from module definitions
+        params = {}
+        alias_pairs = []
+        # Look up module definition to get params and aliases
         for mod in all_modules:
             if mod["name"] == name:
+                params = mod.get("params", {})
                 alias_pairs = mod.get("aliases") or []
-                from netlist_tracer.model import merge_aliases_into_subckt
-
-                merge_aliases_into_subckt(sub, alias_pairs)
                 break
+        sub = SubcktDef(name=name, pins=pins_list, params=params)
+        # Merge aliases from module definitions
+        if alias_pairs:
+            from netlist_tracer.model import merge_aliases_into_subckt
+
+            merge_aliases_into_subckt(sub, alias_pairs)
         subckts_out[name] = sub
 
     return subckts_out, instances

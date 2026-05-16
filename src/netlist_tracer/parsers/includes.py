@@ -101,7 +101,7 @@ def expand_includes(
         include_stack.append(cycle_key)
 
         try:
-            with open(abs_path) as f:
+            with open(abs_path, encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
         except FileNotFoundError as e:
             raise NetlistParseError(f"Include file not found: {abs_path}") from e
