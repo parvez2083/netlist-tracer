@@ -47,6 +47,7 @@ class NetlistParser:
         workers: int = 0,
         include_paths: Optional[list[str]] = None,
         format: Optional[str] = None,
+        bus_order: str = "msb_first",
     ) -> None:
         """Parse a netlist source.
 
@@ -63,6 +64,7 @@ class NetlistParser:
             include_paths: Optional list of additional search directories for includes.
             format: Override auto-detection with explicit format string.
                 Valid values: 'spice', 'cdl', 'spectre', 'spf', 'verilog', 'edif', None (auto-detect).
+            bus_order: Bus bit ordering for EDIF port arrays ('msb_first' or 'lsb_first'). Ignored for non-EDIF formats.
         """
         # Validate format parameter
         valid_formats = {"spice", "cdl", "spectre", "spf", "verilog", "edif", None}
@@ -88,6 +90,7 @@ class NetlistParser:
         self.files: list[str] = []
         self.global_nets: list[str] = []
         self._user_format = format
+        self._bus_order = bus_order
 
         # JSON cache: load pre-parsed data directly
         if os.path.isfile(filename) and filename.endswith(".json"):
@@ -491,7 +494,7 @@ class NetlistParser:
         Returns:
             Tuple of (subckts dict, instances list, empty global_nets list)
         """
-        subckts, instances = parse_edif(filepath)
+        subckts, instances = parse_edif(filepath, bs_rdr=self._bus_order)
         return subckts, instances, []
 
     def _parse_spectre(

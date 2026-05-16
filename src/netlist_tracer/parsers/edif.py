@@ -13,11 +13,14 @@ from netlist_tracer.model import Instance, SubcktDef
 _logger = get_logger(__name__)
 
 
-def parse_edif(filename: str) -> tuple[dict[str, SubcktDef], list[Instance]]:
+def parse_edif(
+    filename: str, bs_rdr: str = "msb_first"
+) -> tuple[dict[str, SubcktDef], list[Instance]]:
     """Parse EDIF netlist file.
 
     Args:
         filename: Path to .edif/.edn/.edf file.
+        bs_rdr: Bus order ('msb_first' or 'lsb_first').
 
     Returns:
         Tuple of (subckts_dict, instances_list) matching parse_spice signature.
@@ -25,6 +28,10 @@ def parse_edif(filename: str) -> tuple[dict[str, SubcktDef], list[Instance]]:
     Raises:
         NetlistParseError: On malformed s-expression or unsupported construct.
     """
+    # Validate bus_order
+    if bs_rdr not in ("msb_first", "lsb_first"):
+        raise NetlistParseError(f"Invalid bus_order: {bs_rdr} (must be 'msb_first' or 'lsb_first')")
+
     with open(filename, encoding="utf-8", errors="replace") as f:
         text = f.read()
 
@@ -38,7 +45,7 @@ def parse_edif(filename: str) -> tuple[dict[str, SubcktDef], list[Instance]]:
     instances: list[Instance] = []
 
     # Walk (edif ...) root
-    _walk_root(root, subckts, instances)
+    _walk_root(root, subckts, instances, bs_rdr)
 
     _logger.info(f"EDIF parse complete: {len(subckts)} subckts, {len(instances)} instances")
 
@@ -135,10 +142,10 @@ def _tokenize(text: str) -> Iterator[tuple[str, str, int]]:
             i = j
             continue
 
-        # Atom (alphanumeric, symbols)
-        if ch.isalnum() or ch in "-_*+/<>=!?&|^~':":
+        # Atom (alphanumeric, symbols, dot for floats)
+        if ch.isalnum() or ch in "-_*+/<>=!?&|^~':.":
             j = i
-            while j < len(text) and (text[j].isalnum() or text[j] in "-_*+/<>=!?&|^~':"):
+            while j < len(text) and (text[j].isalnum() or text[j] in "-_*+/<>=!?&|^~':."):
                 j += 1
             atom_text = text[i:j]
             yield ("atom", atom_text, line_no)
@@ -184,31 +191,122 @@ def _parse_sexpr(tokens: Iterator[tuple[str, str, int]]) -> Union[str, list]:
     return result[0]
 
 
-def _unwrap_name(node: Union[str, list]) -> str:
+def _unwrap_name(node: Union[str, list]) -> tuple[str, str | None]:
     """Extract canonical name from EDIF identifier. Handles bare atom or (rename safe \"orig\").
 
     Args:
         node: Atom or s-expression representing a name.
 
     Returns:
-        Safe identifier string.
+        Tuple of (safe_name, original_name_or_None).
 
     Raises:
         NetlistParseError: If (rename ...) structure is malformed.
     """
     if isinstance(node, str):
-        return node
+        return node, None
 
     if isinstance(node, list) and len(node) >= 2:
         head = node[0]
         if isinstance(head, str) and head.lower() == "rename":
             safe = node[1]
             if isinstance(safe, str):
+                orgnl_nm = None
                 if len(node) > 2 and isinstance(node[2], str):
-                    _logger.debug(f"rename: safe={safe}, original={node[2]}")
-                return safe
+                    orgnl_nm = node[2]
+                    _logger.debug(f"rename: safe={safe}, original={orgnl_nm}")
+                return safe, orgnl_nm
 
     raise NetlistParseError(f"Invalid name node: {node}")
+
+
+def _parse_property(prp_nd: list) -> tuple[str, str | int | float | bool] | None:
+    """Parse a single (property name (string|integer|boolean|real value)) s-expression.
+
+    Args:
+        prp_nd: S-expression of form (property name (<type> value))
+
+    Returns:
+        (prop_name, typed_value) tuple or None if malformed.
+    """
+    if not isinstance(prp_nd, list) or len(prp_nd) < 3:
+        return None
+
+    head = prp_nd[0]
+    if not isinstance(head, str) or head.lower() != "property":
+        return None
+
+    prp_nm = None
+    if isinstance(prp_nd[1], str):
+        prp_nm = prp_nd[1]
+
+    if not prp_nm:
+        return None
+
+    # Parse the value node: (type value)
+    vl_nd = prp_nd[2]
+    if not isinstance(vl_nd, list) or len(vl_nd) < 2:
+        _logger.warning(f"Property {prp_nm}: malformed value node")
+        return None
+
+    tp = None
+    if isinstance(vl_nd[0], str):
+        tp = vl_nd[0].lower()
+
+    vl = vl_nd[1]
+
+    if tp == "string":
+        if isinstance(vl, str):
+            return prp_nm, vl
+    elif tp == "integer":
+        if isinstance(vl, str):
+            try:
+                return prp_nm, int(vl)
+            except ValueError:
+                _logger.warning(f"Property {prp_nm}: cannot parse integer value '{vl}'")
+    elif tp == "boolean":
+        if isinstance(vl, str):
+            vl_lo = vl.lower()
+            if vl_lo == "true":
+                return prp_nm, True
+            elif vl_lo == "false":
+                return prp_nm, False
+    elif tp == "real":
+        if isinstance(vl, str):
+            try:
+                return prp_nm, float(vl)
+            except ValueError:
+                _logger.warning(f"Property {prp_nm}: cannot parse real value '{vl}'")
+    else:
+        _logger.warning(f"Property {prp_nm}: unknown type '{tp}', storing as string")
+        return prp_nm, str(vl)
+
+    return None
+
+
+def _collect_properties(prnt_nd: list) -> dict[str, str | int | float | bool]:
+    """Walk a cell/instance/net s-expression, collect all (property ...) children into a dict.
+
+    Args:
+        prnt_nd: Any node that may contain (property ...) child s-expressions
+
+    Returns:
+        Dict {prop_name: typed_value}
+    """
+    prp_dct: dict[str, str | int | float | bool] = {}
+
+    if not isinstance(prnt_nd, list):
+        return prp_dct
+
+    for chld in prnt_nd:
+        if isinstance(chld, list) and len(chld) > 0:
+            if isinstance(chld[0], str) and chld[0].lower() == "property":
+                rslt = _parse_property(chld)
+                if rslt:
+                    prp_nm, vl = rslt
+                    prp_dct[prp_nm] = vl
+
+    return prp_dct
 
 
 def _collect_libraries(root: Union[str, list]) -> list[Union[str, list]]:
@@ -234,13 +332,14 @@ def _collect_libraries(root: Union[str, list]) -> list[Union[str, list]]:
 
 
 def _parse_cell(
-    cell_node: Union[str, list], lib_name: str
+    cell_node: Union[str, list], lib_name: str, bs_rdr: str = "msb_first"
 ) -> tuple[Optional[SubcktDef], Optional[Union[str, list]]]:
     """Parse one (cell ...) s-expression. Find NETLIST view and build SubcktDef.
 
     Args:
         cell_node: (cell ...) s-expression.
         lib_name: Containing library name.
+        bs_rdr: Bus order ('msb_first' or 'lsb_first').
 
     Returns:
         (SubcktDef, contents_expr) or (None, None) if no NETLIST view.
@@ -257,7 +356,7 @@ def _parse_cell(
 
     # Extract cell name
     cell_name_node = cell_node[1]
-    cell_name = _unwrap_name(cell_name_node)
+    sf_nm, orgnl_nm = _unwrap_name(cell_name_node)
 
     # Find the NETLIST view
     netlist_view = None
@@ -279,12 +378,10 @@ def _parse_cell(
                     netlist_view = child
                     break
                 else:
-                    _logger.info(
-                        f"Skipping {cell_name} view type {view_type} (only NETLIST supported)"
-                    )
+                    _logger.info(f"Skipping {sf_nm} view type {view_type} (only NETLIST supported)")
 
     if netlist_view is None:
-        _logger.info(f"Cell {cell_name} has no NETLIST view; skipping")
+        _logger.info(f"Cell {sf_nm} has no NETLIST view; skipping")
         return None, None
 
     # Parse interface (ports)
@@ -300,22 +397,36 @@ def _parse_cell(
             continue
 
         if vchild_head.lower() == "interface":
-            pins = _parse_interface(view_child)
+            pins = _parse_interface(view_child, bs_rdr)
         elif vchild_head.lower() == "contents":
             contents = view_child
 
-    subckt = SubcktDef(name=cell_name, pins=pins)
+    subckt = SubcktDef(name=sf_nm, pins=pins)
+
+    # Record library origin
+    subckt.params["_edif_library"] = lib_name
+
+    # Record original name if it was renamed
+    if orgnl_nm is not None:
+        subckt.params["_edif_original_name"] = orgnl_nm
+
+    # Collect cell-level properties
+    prp_dct = _collect_properties(cell_node)
+    if prp_dct:
+        subckt.params["_edif_properties"] = prp_dct
+
     return subckt, contents
 
 
-def _parse_interface(interface_node: Union[str, list]) -> list[str]:
+def _parse_interface(interface_node: Union[str, list], bs_rdr: str = "msb_first") -> list[str]:
     """Parse (interface ...) and extract port names, expanding bus ports.
 
     Args:
         interface_node: (interface ...) s-expression.
+        bs_rdr: Bus order ('msb_first' or 'lsb_first').
 
     Returns:
-        List of port names (bit-level, MSB-first for buses).
+        List of port names (bit-level).
 
     Raises:
         NetlistParseError: On malformed port or unsupported bus form.
@@ -361,8 +472,8 @@ def _parse_interface(interface_node: Union[str, list]) -> list[str]:
                                     pass
 
                             name_node = port_child[1]
-                            port_name_try = _unwrap_name(name_node)
-                            port_name = port_name_try
+                            sf_nm, _ = _unwrap_name(name_node)
+                            port_name = sf_nm
 
                             # Extract MSB:LSB from the original string if available
                             if isinstance(name_node, list) and len(name_node) > 2:
@@ -377,12 +488,20 @@ def _parse_interface(interface_node: Union[str, list]) -> list[str]:
 
         if port_name:
             if is_array and array_width > 0 and msb_str and lsb_str:
-                # Expand bus to bit-level pins, MSB-first
+                # Expand bus to bit-level pins
                 msb = int(msb_str)
                 lsb = int(lsb_str)
                 sign = 1 if msb >= lsb else -1
+                bit_indices: list[int] = []
                 for k in range(array_width):
                     bit_idx = msb - sign * k
+                    bit_indices.append(bit_idx)
+
+                # Apply bus order: msb_first keeps original order, lsb_first reverses
+                if bs_rdr == "lsb_first":
+                    bit_indices.reverse()
+
+                for bit_idx in bit_indices:
                     pins.append(f"{port_name}[{bit_idx}]")
             else:
                 # Single-bit port
@@ -467,9 +586,12 @@ def _parse_contents(
         if len(child) < 2:
             continue
 
-        instance_name = child[1]
-        if not isinstance(instance_name, str):
-            instance_name = _unwrap_name(instance_name)
+        inst_nm_nd = child[1]
+        if isinstance(inst_nm_nd, str):
+            inst_nm = inst_nm_nd
+            inst_orgnl = None
+        else:
+            inst_nm, inst_orgnl = _unwrap_name(inst_nm_nd)
 
         cell_type: Optional[str] = None
         for inst_child in child[2:]:
@@ -483,19 +605,29 @@ def _parse_contents(
                             if isinstance(vcc_head, str) and vcc_head.lower() == "cellref":
                                 if len(vc_child) > 1:
                                     cell_ref_node = vc_child[1]
-                                    cell_type = _unwrap_name(cell_ref_node)
+                                    cell_type_nm, _ = _unwrap_name(cell_ref_node)
+                                    cell_type = cell_type_nm
 
         if cell_type and cell_type in subckts:
             cell_def = subckts[cell_type]
             # Build nets[] in pin order
             nets: list[str] = []
             for pin in cell_def.pins:
-                net_name = net_map.get((instance_name, pin), "")
+                net_name = net_map.get((inst_nm, pin), "")
                 nets.append(net_name)
 
-            inst = Instance(
-                name=instance_name, parent_cell=parent_cell, cell_type=cell_type, nets=nets
-            )
+            inst = Instance(name=inst_nm, parent_cell=parent_cell, cell_type=cell_type, nets=nets)
+
+            # Record original instance name if renamed
+            if inst_orgnl is not None:
+                inst.params["_edif_original_name"] = inst_orgnl
+
+            # Collect instance-level properties
+            if isinstance(child, list):
+                prp_dct = _collect_properties(child)
+                if prp_dct:
+                    inst.params["_edif_properties"] = prp_dct
+
             instances.append(inst)
 
     return instances
@@ -550,7 +682,10 @@ def _extract_portref(
 
 
 def _walk_root(
-    root: Union[str, list], subckts: dict[str, SubcktDef], instances: list[Instance]
+    root: Union[str, list],
+    subckts: dict[str, SubcktDef],
+    instances: list[Instance],
+    bs_rdr: str = "msb_first",
 ) -> None:
     """Walk (edif ...) root, extracting libraries and cells.
 
@@ -558,6 +693,7 @@ def _walk_root(
         root: Root s-expression.
         subckts: Dict to populate with SubcktDef objects.
         instances: List to append Instance objects to.
+        bs_rdr: Bus order ('msb_first' or 'lsb_first').
 
     Raises:
         NetlistParseError: On unsupported EDIF version or other errors.
@@ -599,18 +735,26 @@ def _walk_root(
 
         lib_name_node = lib_node[1]
         if isinstance(lib_name_node, str):
-            lib_name = lib_name_node
+            lib_nm = lib_name_node
         else:
-            lib_name = _unwrap_name(lib_name_node)
+            lib_nm, _ = _unwrap_name(lib_name_node)
 
         # Walk cells in this library
         for lib_child in lib_node[2:]:
             if isinstance(lib_child, list) and len(lib_child) > 0:
                 lc_head = lib_child[0]
                 if isinstance(lc_head, str) and lc_head.lower() == "cell":
-                    subckt, contents = _parse_cell(lib_child, lib_name)
+                    subckt, contents = _parse_cell(lib_child, lib_nm, bs_rdr)
                     if subckt:
-                        subckts[subckt.name] = subckt
-                        if contents:
-                            cell_instances = _parse_contents(contents, subckt.name, subckts)
-                            instances.extend(cell_instances)
+                        # Check for collision: same cell name in multiple libraries
+                        if subckt.name in subckts:
+                            xst_lib = subckts[subckt.name].params.get("_edif_library", "unknown")
+                            _logger.warning(
+                                f"Cell '{subckt.name}' found in multiple libraries: "
+                                f"'{xst_lib}' and '{lib_nm}'; keeping first-encountered definition"
+                            )
+                        else:
+                            subckts[subckt.name] = subckt
+                            if contents:
+                                cell_instances = _parse_contents(contents, subckt.name, subckts)
+                                instances.extend(cell_instances)

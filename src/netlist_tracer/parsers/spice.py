@@ -156,7 +156,7 @@ def _parse_spice_element(text: str, parent_cell: str) -> Optional[Instance]:
             cell_type="B_BSRC",
             nets=nets,
             parent_cell=parent_cell,
-            params={"_expr": expr} if expr else None,
+            params={"_expr": expr} if expr else {},
         )
 
     elif elem_type_char == "E":
@@ -177,7 +177,7 @@ def _parse_spice_element(text: str, parent_cell: str) -> Optional[Instance]:
             cell_type="E_VCVS",
             nets=nets,
             parent_cell=parent_cell,
-            params=params if params else None,
+            params=params if params else {},
         )
 
     elif elem_type_char == "G":
@@ -198,7 +198,7 @@ def _parse_spice_element(text: str, parent_cell: str) -> Optional[Instance]:
             cell_type="G_VCCS",
             nets=nets,
             parent_cell=parent_cell,
-            params=params if params else None,
+            params=params if params else {},
         )
 
     elif elem_type_char == "F":
@@ -559,5 +559,5 @@ def _parse_spice_instance(text: str, parent_cell: str) -> Optional[Instance]:
         cell_type=cell_type,
         nets=nets,
         parent_cell=parent_cell,
-        params=params or None,
+        params=params or {},
     )

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -32,9 +31,7 @@ class Instance:
     cell_type: str
     nets: list[str]
     parent_cell: str
-    params: Optional[dict[str, str]] = field(
-        default=None
-    )  # param=value pairs from SPICE instance lines
+    params: dict = field(default_factory=dict)  # format-specific metadata (EDIF properties, etc.)
 
 
 def merge_aliases_into_subckt(sub: SubcktDef, pairs: Iterable[tuple[str, str]]) -> None:
