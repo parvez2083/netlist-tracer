@@ -13,6 +13,7 @@ from netlist_tracer.model import Instance, SubcktDef, merge_aliases_into_subckt
 from netlist_tracer.parsers.detect import detect_format, detect_format_per_file
 from netlist_tracer.parsers.edif import parse_edif
 from netlist_tracer.parsers.spectre import parse_spectre
+from netlist_tracer.parsers.spf import parse_spf
 from netlist_tracer.parsers.spice import parse_spice
 from netlist_tracer.parsers.verilog.instances import _sv_parse_file
 from netlist_tracer.parsers.verilog.preprocess import _sv_discover_headers, _sv_parse_defines
@@ -61,10 +62,10 @@ class NetlistParser:
             workers: Parallel worker count (0 = auto).
             include_paths: Optional list of additional search directories for includes.
             format: Override auto-detection with explicit format string.
-                Valid values: 'spice', 'cdl', 'spectre', 'verilog', 'edif', None (auto-detect).
+                Valid values: 'spice', 'cdl', 'spectre', 'spf', 'verilog', 'edif', None (auto-detect).
         """
         # Validate format parameter
-        valid_formats = {"spice", "cdl", "spectre", "verilog", "edif", None}
+        valid_formats = {"spice", "cdl", "spectre", "spf", "verilog", "edif", None}
         if format is not None and format not in valid_formats:
             raise NetlistParseError(
                 f"Invalid format '{format}': must be one of "
@@ -110,6 +111,8 @@ class NetlistParser:
                 "ckt",
                 "scs",
                 "cdl",
+                "spf",
+                "dspf",
                 "edif",
                 "edn",
                 "edf",
@@ -171,17 +174,17 @@ class NetlistParser:
 
         Routes to the appropriate parser for one format and returns
         (subckts, instances, global_nets) tuple. Verilog handles multiple
-        files; SPICE/CDL/Spectre/EDIF expect exactly one file per group.
+        files; SPICE/CDL/Spectre/SPF/EDIF expect exactly one file per group.
 
         Args:
-            format: Format name ('verilog', 'spice', 'cdl', 'spectre', 'edif')
+            format: Format name ('verilog', 'spice', 'cdl', 'spectre', 'spf', 'edif')
             files: Files for this format
 
         Returns:
             Tuple of (subckts dict, instances list, global_nets list)
 
         Raises:
-            NetlistParseError if SPICE/CDL/Spectre/EDIF group has >1 files
+            NetlistParseError if SPICE/CDL/Spectre/SPF/EDIF group has >1 files
         """
         if format == "verilog":
             # Verilog parser handles multiple files via existing pipeline
@@ -203,6 +206,14 @@ class NetlistParser:
                     f"spectre parser expects exactly one file in group; got {len(files)} files: {files}"
                 )
             sbckts, insts, gbl_nets = self._parse_spectre(files[0])
+            return sbckts, insts, gbl_nets
+
+        elif format == "spf":
+            if len(files) != 1:
+                raise NetlistParseError(
+                    f"spf parser expects exactly one file in group; got {len(files)} files: {files}"
+                )
+            sbckts, insts, gbl_nets = self._parse_spf(files[0])
             return sbckts, insts, gbl_nets
 
         else:  # spice, cdl, or unknown defaults to spice
@@ -385,6 +396,12 @@ class NetlistParser:
                 self.global_nets = gbl_nets
                 for inst in insts:
                     self._add_instance(inst)
+            elif self.format == "spf":
+                sbckts, insts, gbl_nets = self._dispatch_single_format("spf", self.files)
+                self.subckts = sbckts
+                self.global_nets = gbl_nets
+                for inst in insts:
+                    self._add_instance(inst)
             else:  # spice, cdl, unknown
                 sbckts, insts, gbl_nets = self._dispatch_single_format("spice", self.files)
                 self.subckts = sbckts
@@ -490,6 +507,18 @@ class NetlistParser:
         """
         subckts, instances = parse_spectre(filepath, include_paths=self.include_paths)
         return subckts, instances, []
+
+    def _parse_spf(self, filepath: str) -> tuple[dict[str, SubcktDef], list[Instance], list[str]]:
+        """Parse SPF netlist and return results without mutation.
+
+        Args:
+            filepath: Path to SPF/DSPF file
+
+        Returns:
+            Tuple of (subckts dict, instances list, global_nets list)
+        """
+        subckts, instances, global_nets = parse_spf(filepath, include_paths=self.include_paths)
+        return subckts, instances, global_nets
 
     def _parse_verilog(self) -> None:
         """Full SV elaboration pipeline."""

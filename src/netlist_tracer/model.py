@@ -17,6 +17,8 @@ class SubcktDef:
     # Map of net -> canonical-net for SystemVerilog `assign A = B;` aliases.
     # Two nets that share a canonical are connected by a continuous-assign.
     aliases: dict[str, str] = field(default_factory=dict)
+    # Arbitrary metadata attached by format-specific parsers (SPF caps, ground nets, pin aliases, etc.)
+    params: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.pin_to_pos = {pin: i for i, pin in enumerate(self.pins)}

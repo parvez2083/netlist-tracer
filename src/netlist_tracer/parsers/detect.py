@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import re
 from typing import Optional
 
@@ -41,11 +42,15 @@ def _score_content(content: str) -> dict[str, int]:
     Outputs:
         Dict mapping format name to accumulated score
     """
-    scores: dict[str, int] = {"edif": 0, "verilog": 0, "spectre": 0, "cdl": 0, "spice": 0}
+    scores: dict[str, int] = {"edif": 0, "verilog": 0, "spectre": 0, "cdl": 0, "spice": 0, "spf": 0}
 
     # EDIF: s-expression prefix is unmistakable
     if re.search(r"\(edif\b", content):
         scores["edif"] += 10
+
+    # SPF/DSPF: *|DSPF, *|RSPF, or *|CCSPF marker (highest SPICE-family priority)
+    if re.search(r"\*\|(DSPF|RSPF|CCSPF)", content):
+        scores["spf"] += 10
 
     # Verilog-A: electrical or analog begin block
     if _recognize_va_module(content):
@@ -90,6 +95,7 @@ def _extension_hint(filepath: str) -> Optional[str]:
     """Return suggested format from file extension.
 
     Used only as tiebreaker when content scores are tied or zero.
+    If path ends with .gz, strips it and re-checks the underlying extension.
 
     Inputs:
         filepath: File path
@@ -113,9 +119,16 @@ def _extension_hint(filepath: str) -> Optional[str]:
         ".spi": "spice",
         ".cir": "spice",
         ".ckt": "spice",
+        ".spf": "spf",
+        ".dspf": "spf",
     }
 
     lower_path = filepath.lower()
+
+    # Strip .gz suffix if present and re-check underlying extension
+    if lower_path.endswith(".gz"):
+        lower_path = lower_path[:-3]
+
     for ext, fmt in ext_map.items():
         if lower_path.endswith(ext):
             return fmt
@@ -169,7 +182,7 @@ def _pick_format(scores: dict[str, int], ext_hint: Optional[str]) -> str:
         return ext_hint
 
     # Rule 4c: Tie with no matching extension hint -- pick by priority
-    priority = ["edif", "spectre", "verilog", "cdl", "spice"]
+    priority = ["edif", "spectre", "verilog", "cdl", "spf", "spice"]
     for fmt in priority:
         if fmt in tied_formats:
             return fmt
@@ -186,6 +199,7 @@ def detect_format(filepaths: list[str]) -> str:
 
     Distinguishing markers (by specificity):
     - EDIF:     '(edif ' s-expression prefix (weight 10)
+    - SPF:      '*|DSPF', '*|RSPF', '*|CCSPF' content marker (weight 10)
     - Spectre:  'simulator lang=spectre' directive (weight 10)
                 bare 'subckt <name>' (weight 5)
     - Verilog:  'module <name>' keyword (weight 5)
@@ -200,16 +214,28 @@ def detect_format(filepaths: list[str]) -> str:
         filepaths: List of file paths to scan for format markers.
 
     Returns:
-        Format string: 'edif', 'verilog', 'spectre', 'cdl', or 'spice'.
+        Format string: 'edif', 'verilog', 'spectre', 'cdl', 'spf', or 'spice'.
     """
     if not filepaths:
         return "spice"
 
-    all_scores: dict[str, int] = {"edif": 0, "verilog": 0, "spectre": 0, "cdl": 0, "spice": 0}
+    all_scores: dict[str, int] = {
+        "edif": 0,
+        "verilog": 0,
+        "spectre": 0,
+        "cdl": 0,
+        "spice": 0,
+        "spf": 0,
+    }
 
     for filepath in filepaths:
-        with open(filepath) as f:
-            content = f.read(4096)
+        # Handle .gz files with gzip.open; use errors='replace' for corrupted bytes
+        if filepath.lower().endswith(".gz"):
+            with gzip.open(filepath, "rt", encoding="utf-8", errors="replace") as f:
+                content = f.read(4096)
+        else:
+            with open(filepath) as f:
+                content = f.read(4096)
 
         scores = _score_content(content)
         for fmt in all_scores:

@@ -1,0 +1,21 @@
+*|DSPF 1.0
+*|DIVIDER /
+*|DELIMITER :
+*|DESIGN simple
+*|DATE 2026-05-16
+*|VENDOR TSMC
+*|PROGRAM StarRC
+
+.SUBCKT INV in out vdd gnd
+*|GROUND_NET gnd
+*|NET out 1.5PF
+*|I (M1:S M1 S B 0 0.0 0.0)
+*|I (M2:D M2 D Y 0 0.0 0.0)
+
+R1 in/X in/Y 10.5
+R2 in/Y gnd 5.2
+
+C1 in/X gnd 0.8PF
+C2 out/net1 out/net2 1.2PF
+
+.ENDS INV
