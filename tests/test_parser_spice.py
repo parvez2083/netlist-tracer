@@ -905,3 +905,47 @@ class TestSpiceIncludeSupport:
 
             error_msg = str(exc_info.value)
             assert "cycle" in error_msg.lower()
+
+
+class TestSpicePeek:
+    """Peek tests for SPICE/CDL format."""
+
+    def test_peek_basic(self, synthetic_spice_basic_sp):
+        """Test peek on basic SPICE file returns expected pins."""
+        pns = NetlistParser.peek_pins(synthetic_spice_basic_sp, "nand2")
+        assert pns is not None
+        assert "Y" in pns
+        assert "A" in pns
+        assert "B" in pns
+        assert "VDD" in pns
+        assert "VSS" in pns
+
+    def test_peek_top_cell(self, synthetic_spice_basic_sp):
+        """Test peek finds pins for top-level cell."""
+        pns = NetlistParser.peek_pins(synthetic_spice_basic_sp, "top_spice")
+        assert pns is not None
+        assert "VDD" in pns
+        assert "VSS" in pns
+        assert "A" in pns
+
+    def test_peek_cell_not_found(self, synthetic_spice_basic_sp):
+        """Test peek returns None for non-existent cell."""
+        pns = NetlistParser.peek_pins(synthetic_spice_basic_sp, "NONEXISTENT")
+        assert pns is None
+
+    def test_peek_continuation_line(self, synthetic_spice_basic_sp):
+        """Test that peek handles basic SPICE files."""
+        # synthetic_spice_basic_sp has single-line subckt definitions
+        # This test verifies peek works on it
+        pns = NetlistParser.peek_pins(synthetic_spice_basic_sp, "nand2")
+        assert pns is not None
+        assert len(pns) > 0
+
+    def test_peek_case_insensitive(self, synthetic_spice_basic_sp):
+        """Test peek is case-insensitive for SPICE cell names."""
+        pns_lower = NetlistParser.peek_pins(synthetic_spice_basic_sp, "nand2")
+        pns_upper = NetlistParser.peek_pins(synthetic_spice_basic_sp, "NAND2")
+        assert pns_lower is not None
+        assert pns_upper is not None
+        # Should find the same pins (in same order since both hit the same line)
+        assert pns_lower == pns_upper

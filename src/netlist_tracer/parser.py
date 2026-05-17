@@ -12,6 +12,7 @@ from netlist_tracer.exceptions import NetlistParseError
 from netlist_tracer.model import Instance, SubcktDef, merge_aliases_into_subckt
 from netlist_tracer.parsers.detect import detect_format, detect_format_per_file
 from netlist_tracer.parsers.edif import parse_edif
+from netlist_tracer.parsers.peek import peek_pins as _pk_pns
 from netlist_tracer.parsers.spectre import parse_spectre
 from netlist_tracer.parsers.spf import parse_spf
 from netlist_tracer.parsers.spice import parse_spice
@@ -36,6 +37,26 @@ _FORMAT_PRIORITY = {
 
 class NetlistParser:
     """Parses CDL, SPICE, Spectre, and Verilog/SystemVerilog netlists."""
+
+    @classmethod
+    def peek_pins(cls, flpth: str, cell: str, fmt: str | None = None) -> list[str] | None:
+        """Fast pre-scan to peek at a cell's pin list WITHOUT running full parse.
+
+        Safe for large files (e.g., 600 MB DSPF.gz): completes in < 2 seconds
+        vs. full parse taking 60+ seconds. Returns None if cell not found,
+        enabling safe fall-through to full parse.
+
+        Inputs:
+            flpth: Path to netlist file or directory
+            cell: Cell/module name to find
+            fmt: Optional explicit format hint ('spice', 'cdl', 'spectre', 'spf',
+                'verilog', 'edif', or None for auto-detect)
+
+        Outputs:
+            list[str] of pin names if cell found, None otherwise (NEVER raises
+            on cell-not-found; raises only on bad inputs)
+        """
+        return _pk_pns(flpth, cell, fmt=fmt)
 
     def __init__(
         self,

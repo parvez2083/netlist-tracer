@@ -443,3 +443,55 @@ class TestCacheRoundtrip:
 
         # Trace equality must still hold
         assert formatted2 == formatted1, f"Cache roundtrip mismatch for {format_name}"
+
+
+# ---------------------------------------------------------------------------
+# Real-cache smoke tests (env-gated via NETLIST_TRACER_LOCAL_CACHE)
+# Folded in from former tests/test_local_smoke.py to mirror the
+# real-DSPF smoke folding into test_parser_spf.py.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.local
+class TestRealCacheSmoke:
+    """Smoke tests using a real-world JSON cache if NETLIST_TRACER_LOCAL_CACHE env var is set."""
+
+    @pytest.fixture
+    def local_cache_path(self) -> str:
+        """Get NETLIST_TRACER_LOCAL_CACHE env var or skip test."""
+        path = os.environ.get("NETLIST_TRACER_LOCAL_CACHE")
+        if not path or not Path(path).exists():
+            pytest.skip("NETLIST_TRACER_LOCAL_CACHE not set or file does not exist")
+        return path
+
+    def test_local_cache_loads(self, local_cache_path: str) -> None:
+        """Local JSON cache loads without error and yields non-trivial state."""
+        parser = NetlistParser(local_cache_path)
+        assert parser.format in {"verilog", "spice", "cdl", "spectre", "spf", "edif"}
+        assert len(parser.subckts) > 0, "cache should contain at least one subckt"
+        total_instances = sum(len(v) for v in parser.instances_by_parent.values())
+        assert total_instances > 0, "cache should contain at least one instance"
+
+    def test_local_cache_has_pins(self, local_cache_path: str) -> None:
+        """First subckt in cache should have at least one pin."""
+        parser = NetlistParser(local_cache_path)
+        first_cell = next(iter(parser.subckts.keys()))
+        pins = parser.subckts[first_cell].pins
+        assert len(pins) > 0, f"first subckt {first_cell!r} should have at least one pin"
+
+    def test_local_cache_deterministic_trace(self, local_cache_path: str) -> None:
+        """Trace from first subckt's first pin completes without raising."""
+        parser = NetlistParser(local_cache_path)
+        tracer = BidirectionalTracer(parser)
+        first_cell = next(iter(parser.subckts.keys()))
+        pins = parser.subckts[first_cell].pins
+        if not pins:
+            pytest.skip(f"first subckt {first_cell!r} has no pins")
+        first_pin = pins[0]
+        paths = tracer.trace(first_cell, first_pin)
+        assert isinstance(paths, list), "trace() must return a list"
+
+    def test_local_cache_schema_version(self, local_cache_path: str) -> None:
+        """Cache loads successfully (any supported schema version)."""
+        parser = NetlistParser(local_cache_path)
+        assert len(parser.subckts) > 0, "parser loaded cache successfully"

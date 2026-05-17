@@ -813,3 +813,64 @@ endinterface
             f"Expected at least one interface SubcktDef in {target.name}; "
             f"found kinds: {sorted({sub.params.get('_kind', 'module') for sub in parser.subckts.values()})}"
         )
+
+
+class TestVerilogPeek:
+    """Peek tests for Verilog format."""
+
+    def test_peek_single_file(self, synthetic_concat_alias_v):
+        """Test peek on single Verilog file returns expected ports."""
+        pns = NetlistParser.peek_pins(synthetic_concat_alias_v, "concat_alias")
+        assert pns is not None
+        assert len(pns) > 0
+
+    def test_peek_not_found(self, synthetic_concat_alias_v):
+        """Test peek returns None for non-existent module."""
+        pns = NetlistParser.peek_pins(synthetic_concat_alias_v, "NONEXISTENT_MODULE")
+        assert pns is None
+
+    def test_peek_basic_module(self, synthetic_verilog_gate_primitives_v):
+        """Test peek on Verilog gate primitives module."""
+        pns = NetlistParser.peek_pins(
+            synthetic_verilog_gate_primitives_v, "verilog_gate_primitives"
+        )
+        assert pns is not None
+        assert len(pns) > 0
+        # Should have the input/output ports
+        assert "a" in pns or "b" in pns
+
+    def test_peek_case_sensitive(self, synthetic_concat_alias_v):
+        """Test peek is case-sensitive for Verilog module names."""
+        pns_correct = NetlistParser.peek_pins(synthetic_concat_alias_v, "concat_alias")
+        pns_wrong = NetlistParser.peek_pins(synthetic_concat_alias_v, "CONCAT_ALIAS")
+        # Verilog module names are case-sensitive
+        assert pns_correct is not None
+        assert pns_wrong is None
+
+    def test_peek_backtick_preprocessor_directives_filtered(self):
+        """Peek must filter backtick preprocessor noise from the port list.
+
+        Regression for a real-world case: a module wrapping ports in
+        `ifdef ... `else ... `endif previously caused the peek to return
+        'ifdef', the macro name, 'else', 'endif' as if they were pin
+        names. They are not pins; they must be filtered out.
+        """
+        src = (
+            "module wrapped_ports (\n"
+            "    `ifdef SOME_MACRO\n"
+            "        port_a,\n"
+            "    `else\n"
+            "        port_a,\n"
+            "    `endif\n"
+            "    port_b,\n"
+            "    port_c\n"
+            ");\n"
+            "endmodule\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fpath = Path(tmpdir) / "wrapped.sv"
+            fpath.write_text(src)
+            pns = NetlistParser.peek_pins(str(fpath), "wrapped_ports")
+        assert pns == ["port_a", "port_b", "port_c"], (
+            f"Backtick directives leaked into peek result: {pns}"
+        )

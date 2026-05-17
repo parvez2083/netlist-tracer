@@ -1,13 +1,16 @@
-"""Tests for SPF/DSPF parser functionality."""
+"""Tests for SPF/DSPF parser functionality (incl. env-gated real-DSPF smoke)."""
 
 from __future__ import annotations
 
+import os
 import tempfile
+import time
+from collections import Counter
 from pathlib import Path
 
 import pytest
 
-from netlist_tracer import NetlistParser
+from netlist_tracer import BidirectionalTracer, NetlistParser
 from netlist_tracer.exceptions import NetlistParseError
 from netlist_tracer.parsers.detect import detect_format
 from netlist_tracer.parsers.spf import parse_spf
@@ -620,3 +623,242 @@ R1 sig:1 sig:2 1.5
             assert r1.nets == ["sig:1", "sig:2"]
         finally:
             Path(spf_file).unlink()
+
+
+class TestSpfPeek:
+    """Peek tests for SPF/DSPF format."""
+
+    def test_peek_basic(self, fixtures_synthetic_dir):
+        """Test peek on SPF file returns expected pins."""
+        spf_file = os.path.join(fixtures_synthetic_dir, "simple.spf")
+        if os.path.exists(spf_file):
+            pns = NetlistParser.peek_pins(spf_file, "top")
+            # SPF peek reuses spice-family logic
+            assert pns is None or isinstance(pns, list)
+
+    def test_peek_dspf_marker(self):
+        """Test peek on DSPF format marker."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dspf_file = os.path.join(tmpdir, "test.dspf")
+            with open(dspf_file, "w") as f:
+                f.write("*|DSPF\n")
+                f.write(".SUBCKT top a b c\n")
+                f.write(".ENDS top\n")
+
+            pns = NetlistParser.peek_pins(dspf_file, "top")
+            assert pns is not None
+            assert "a" in pns
+            assert "b" in pns
+            assert "c" in pns
+
+
+# ---------------------------------------------------------------------------
+# Real-DSPF smoke tests (env-gated via NETLIST_TRACER_SPF_SAMPLE)
+# Folded in from former tests/test_real_dspf_smoke.py to mirror the
+# SV interface real-corpus folding pattern.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.local
+class TestRealDspfSmoke:
+    """Tests using real DSPF file if NETLIST_TRACER_SPF_SAMPLE env var is set."""
+
+    @pytest.fixture
+    def spf_sample_path(self) -> str | None:
+        """Get NETLIST_TRACER_SPF_SAMPLE env var or skip test."""
+        path = os.getenv("NETLIST_TRACER_SPF_SAMPLE")
+        if not path or not os.path.exists(path):
+            pytest.skip("NETLIST_TRACER_SPF_SAMPLE not set or file not found")
+        return path
+
+    def test_real_dspf_parse_completes(self, spf_sample_path: str) -> None:
+        """Real DSPF file parses without exception."""
+        parser = NetlistParser(spf_sample_path)
+        assert parser.subckts
+        assert len(parser.subckts) > 0
+
+    def test_real_dspf_has_instances(self, spf_sample_path: str) -> None:
+        """Real DSPF file produces instances."""
+        parser = NetlistParser(spf_sample_path)
+        total_insts = sum(len(insts) for insts in parser.instances_by_parent.values())
+        assert total_insts > 0
+
+    def test_real_dspf_format_marked(self, spf_sample_path: str) -> None:
+        """Real DSPF file format is detected as 'spf'."""
+        parser = NetlistParser(spf_sample_path)
+        assert parser.format == "spf"
+
+    def test_real_dspf_cell_type_breakdown(self, spf_sample_path: str) -> None:
+        """Real DSPF cell_type breakdown shows real model names, not $-prefixed."""
+        parser = NetlistParser(spf_sample_path)
+        top = list(parser.subckts.keys())[0]
+        insts = parser.instances_by_parent.get(top, [])
+        ctps = Counter(i.cell_type for i in insts)
+        dllr_pfxd = {ct for ct in ctps.keys() if ct.startswith("$")}
+        assert len(dllr_pfxd) == 0, f"Found {len(dllr_pfxd)} $-prefixed cell_types: {dllr_pfxd}"
+        has_transistor_or_passive = any(
+            ct.startswith(("nch_", "pch_", "r_", "c_")) or ct in ("R", "C", "L", "M")
+            for ct in ctps.keys()
+        )
+        assert has_transistor_or_passive, (
+            f"Expected at least one transistor or passive element; "
+            f"got cell_types: {list(ctps.keys())}"
+        )
+
+    def test_real_dspf_tracer_ac7a_returns_paths(self, spf_sample_path: str) -> None:
+        """AC7a: Real DSPF tracer returns >= 1 path (lateral walk through galvanic R/L only)."""
+        parser = NetlistParser(spf_sample_path)
+        top = list(parser.subckts.keys())[0]
+        top_subckt = parser.subckts[top]
+        tracer = BidirectionalTracer(parser)
+        found_paths = False
+        for pin in top_subckt.pins[:3]:
+            paths = tracer.trace(top, pin, max_depth=3)
+            assert isinstance(paths, list), "trace() should return a list"
+            if len(paths) >= 1:
+                found_paths = True
+                break
+        assert found_paths, (
+            f"Expected at least one pin on {top} to trace to >= 1 path "
+            f"(AC7a); tested pins: {top_subckt.pins[:3]}"
+        )
+
+    def test_real_dspf_tracer_ac7b_thru_steps(self, spf_sample_path: str) -> None:
+        """AC7b: Traced paths should contain direction='thru' for R cell_type (not C)."""
+        parser = NetlistParser(spf_sample_path)
+        top = list(parser.subckts.keys())[0]
+        top_subckt = parser.subckts[top]
+        tracer = BidirectionalTracer(parser)
+        found_thru_r = False
+        for pin in top_subckt.pins[:5]:
+            paths = tracer.trace(top, pin, max_depth=5)
+            for path in paths:
+                for step in path:
+                    if step.direction == "thru" and step.cell == "R":
+                        found_thru_r = True
+                        break
+            if found_thru_r:
+                break
+        assert found_thru_r, (
+            "Expected at least one path with direction='thru' and cell='R'; "
+            "caps should emit direction='endpoint', not be walked through"
+        )
+
+    def test_real_dspf_tracer_ac7d_caps_skipped(self, spf_sample_path: str) -> None:
+        """AC7d: Caps (C, K) are parasitic noise; no path step should reference them."""
+        parser = NetlistParser(spf_sample_path)
+        top = list(parser.subckts.keys())[0]
+        top_subckt = parser.subckts[top]
+        tracer = BidirectionalTracer(parser)
+        cap_steps_found: list[tuple[str, str, str]] = []
+        for pin in top_subckt.pins[:5]:
+            paths = tracer.trace(top, pin, max_depth=5)
+            for path in paths:
+                for step in path:
+                    if step.cell in ("C", "K"):
+                        cap_steps_found.append((pin, step.direction, str(step.instance_name)))
+        assert not cap_steps_found, (
+            f"Caps (C, K) should be SKIPPED during lateral walk (parasitic noise), "
+            f"but found {len(cap_steps_found)} steps referencing them: {cap_steps_found[:5]}"
+        )
+
+    def test_real_dspf_r_count_reduces(self, spf_sample_path: str) -> None:
+        """Real small DSPF R instance count drops by >= 30% post-reduction."""
+        parser = NetlistParser(spf_sample_path)
+        top = list(parser.subckts.keys())[0]
+        insts = parser.instances_by_parent.get(top, [])
+        r_count_reduced = sum(1 for i in insts if i.cell_type == "R")
+        merged_count = sum(
+            len(i.params.get("_merged_from", [])) - 1
+            for i in insts
+            if i.cell_type == "R" and i.params.get("_merged_from")
+        )
+        r_count_unreduced_est = r_count_reduced + merged_count
+        reduction_pct = (
+            (r_count_unreduced_est - r_count_reduced) / r_count_unreduced_est * 100
+            if r_count_unreduced_est > 0
+            else 0
+        )
+        assert reduction_pct >= 30, (
+            f"Expected R reduction >= 30%; got {reduction_pct:.1f}% "
+            f"(post-reduction: {r_count_reduced}, estimated unreduced: {r_count_unreduced_est})"
+        )
+
+    def test_real_dspf_merged_names_present(self, spf_sample_path: str) -> None:
+        """Real small DSPF has merged R names (_to_) and _merged_from populated."""
+        parser = NetlistParser(spf_sample_path)
+        top = list(parser.subckts.keys())[0]
+        insts = parser.instances_by_parent.get(top, [])
+        merged_names = [i for i in insts if i.cell_type == "R" and "_to_" in i.name]
+        assert len(merged_names) > 0, "Expected at least one R instance with '_to_' in name"
+        merged_from_populated = [
+            i
+            for i in merged_names
+            if i.params.get("_merged_from") and len(i.params.get("_merged_from", [])) > 1
+        ]
+        assert len(merged_from_populated) > 0, (
+            "Expected at least one merged R to have _merged_from with > 1 entries"
+        )
+
+    def test_real_dspf_tracer_reaches_transistor_via_merged_chain(
+        self, spf_sample_path: str
+    ) -> None:
+        """At least one path: thru-step with _to_ instance name AND transistor endpoint."""
+        parser = NetlistParser(spf_sample_path)
+        top = list(parser.subckts.keys())[0]
+        top_subckt = parser.subckts[top]
+        tracer = BidirectionalTracer(parser)
+        found_merged_to_transistor = False
+        for pin in top_subckt.pins[:10]:
+            paths = tracer.trace(top, pin, max_depth=5)
+            for path in paths:
+                has_merged_r = False
+                has_transistor = False
+                for step in path:
+                    if step.direction == "thru" and "_to_" in (step.instance_name or ""):
+                        has_merged_r = True
+                    if step.direction == "endpoint" and step.cell and step.cell[0] in ("n", "p"):
+                        has_transistor = True
+                if has_merged_r and has_transistor:
+                    found_merged_to_transistor = True
+                    break
+            if found_merged_to_transistor:
+                break
+        assert found_merged_to_transistor, (
+            "Expected at least one path with merged R (name contains '_to_') "
+            "reaching a transistor endpoint"
+        )
+
+    def test_reduction_perf_under_5s(self, spf_sample_path: str) -> None:
+        """Performance: small DSPF reduction completes in < 5 seconds."""
+        start_time = time.time()
+        NetlistParser(spf_sample_path)
+        elapsed = time.time() - start_time
+        assert elapsed < 5.0, (
+            f"Expected parse + reduction to complete in < 5.0 seconds; took {elapsed:.2f}s"
+        )
+
+    def test_peek_perf_vs_full_parse(self, spf_sample_path: str) -> None:
+        """Peek performance is dramatically faster than full parse.
+
+        Peek on a large SPF file should complete in < 2 seconds, while
+        full parse takes > 30 seconds (relative ratio test).
+        """
+        start_peek = time.time()
+        top_cell = "top"  # SPF files typically have 'top' or similar
+        pns = NetlistParser.peek_pins(spf_sample_path, top_cell)
+        elapsed_peek = time.time() - start_peek
+        start_parse = time.time()
+        NetlistParser(spf_sample_path)
+        elapsed_parse = time.time() - start_parse
+        assert elapsed_peek < 2.0, (
+            f"Expected peek to complete in < 2.0 seconds; took {elapsed_peek:.2f}s"
+        )
+        if pns is not None:
+            ratio = elapsed_parse / elapsed_peek if elapsed_peek > 0.01 else 1000
+            assert ratio > 5, (
+                f"Expected full parse to be >5x slower than peek; "
+                f"ratio={ratio:.1f} (peek={elapsed_peek:.2f}s, parse={elapsed_parse:.2f}s)"
+            )

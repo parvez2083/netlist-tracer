@@ -7,6 +7,111 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-16
+
+### Added
+
+- **Per-file format detection and per-file parser dispatch**: directories
+  containing mixed-format files (e.g., SPICE + SPF + Verilog) now parse
+  correctly. Each file detected independently, dispatched to its parser,
+  results merged. Subckt-name collisions resolved by format priority
+  (`spectre > cdl > spice > verilog > edif > spf`) with `WARNING`.
+- **SPF/DSPF parser** (`parsers/spf.py`): standalone parser for the SPF
+  family (DSPF, RSPF, CCSPF) of post-layout parasitic netlists.
+  Recognizes `*|DSPF`/`*|RSPF`/`*|CCSPF` content markers and
+  `.spf`/`.dspf` extensions; gzip-compressed `.gz` supported. Honors
+  `*|DIVIDER` and `*|DELIMITER` for hierarchical net naming. Captures
+  `*|GROUND_NET`, `*|NET` (with PF/F/N/U/M unit conversion), `*|I`
+  (pin alias) directives to `SubcktDef.params`. Series-R reduction
+  post-pass merges purely-series R chains into single equivalent R's
+  named `<min_R>_to_<max_R>` with summed value (~60% R-count reduction
+  on the test DSPF) — preserves true topology with minimal tree.
+- **SystemVerilog `interface` parsing**: `interface ... endinterface`
+  recognized as a structural unit. Each interface produces a
+  `SubcktDef` with `_kind='interface'` and `_modports`; each modport
+  produces an additional `SubcktDef` named `<interface>__mp_<modport>`
+  with `_pin_directions` mapping each bit-expanded pin to
+  input/output/inout.
+- **EDIF `(rename safe "original")` preservation**: original names
+  captured in `SubcktDef.params['_edif_original_name']` and
+  `Instance.params['_edif_original_name']`.
+- **EDIF property capture**: cell/instance `(property ...)` blocks
+  collected into `params['_edif_properties']` with typed values
+  (string, integer, real, boolean).
+- **EDIF multi-library tracking**: `params['_edif_library']` records
+  source library; same-named cells across libraries trigger `WARNING`
+  (first-wins).
+- **EDIF `bus_order` kwarg**: `parse_edif(file, bus_order='lsb_first')`
+  and `NetlistParser(file, bus_order='lsb_first')` reverse port-array
+  bit expansion for SpyDrNet compatibility. Default `'msb_first'`
+  unchanged.
+- **Tracer lateral walk on leaf primitives**: when a tracer step lands
+  on an instance whose `cell_type` has no `SubcktDef`, the tracer now
+  walks laterally — R/L emit `direction="thru"` with value-aware label
+  (`<{value}ohm>`/`<{value}H>`); C/K are skipped entirely (parasitic
+  noise, DC-open); other cell_types (transistors, sources) emit
+  `direction="endpoint"` so users see real terminal connections (e.g.,
+  pin D/G/S/B of a MOSFET). Hierarchical netlists unaffected.
+- **`NetlistParser.peek_pins(file, cell, format)` classmethod**: cheap
+  pre-scan of any supported format to return a cell's pin list without
+  running the full parse. CLI uses it to validate `-pin` before parse;
+  on miss prints suggestions and exits 1 in O(seconds) instead of
+  waiting for a multi-minute full parse. Cell-not-found returns `None`
+  (CLI falls through to full parse — no false negatives).
+- **`-format` kwarg + CLI flag** to override format auto-detection.
+- **UTF-8 tolerance**: format-detect, EDIF, and include resolvers now
+  use `errors="replace"` so files with Latin-1 bytes in comments don't
+  fail.
+- **HSPICE `;` and `$` inline comments**, controlled sources B/E/F/G/H,
+  K coupled-inductor, `.global` directive.
+- **Verilog generate-if / generate-case** unrolling; built-in gate
+  primitives; `defparam` resolution.
+- **Verilog-A port shells** with `electrical` ports and `analog begin`
+  body stripping.
+
+### Changed
+
+- **JSON cache schema bumped 2 → 3**: now serializes `Instance.params`
+  and `SubcktDef.params`. Older v0/v1/v2 caches still load (params
+  defaulted to empty dict). Existing applications continue to work;
+  SPF merged R values, SV modport directions, EDIF metadata now
+  survive roundtrip.
+- **SPF subnode handling**: numeric subnodes (e.g. `clk_in:20`)
+  preserved as distinct nets (not collapsed). Letter subnodes
+  (`:D`/`:G`/`:S`/`:B`) always preserved. The series-R reduction
+  handles tracer ergonomics.
+- **`format_path` renders real instance names** for lateral-walk steps
+  (e.g. `R|R5_22|<2208ohm>` instead of `R|<internal>|R:1`).
+- **Format dispatch priority** for multi-format directory collisions:
+  `spectre=5 > cdl=4 > spice=3 > verilog=2 > edif=1 > spf=0`.
+- **Sky130 regression baseline refreshed** to reflect the new tracer
+  behavior on flat-leaf-primitive cells (was 0 paths from pin A; now
+  2 paths reaching nfet/pfet gates — semantic improvement).
+
+### Fixed
+
+- **SPF X-instance parsing**: `cell_type` was being set to StarRC's
+  trailing `$angle=N` annotation; now correctly identifies the actual
+  model (e.g. `nch_ulvt_mac`). Params (`L`, `nfin`, `$x`, `$y`, ...)
+  captured.
+- **Tracer dead-end heuristic** no longer emits spurious bare-prefix
+  fragments when a lateral-walk endpoint already recorded a path.
+- **Cache `.gz` detection** in `detect.py`: gzipped SPF/DSPF files no
+  longer raise `UnicodeDecodeError` on format-detection.
+- **`*|DSPF`/`*|RSPF`/`*|CCSPF` format-marker lines** silently
+  consumed (no more spurious "Unknown SPF directive" warning per
+  parse).
+- **Generate-loop alias expansion** correctly handles nested cases.
+
+### Internal
+
+- **Test consolidation**: 26 test files merged into 14 by per-format
+  grouping with class-based subdivision. Zero semantic test changes.
+  Real-DSPF env-gated smoke tests folded into `test_parser_spf.py`;
+  real-cache env-gated smoke tests folded into `test_cache.py`.
+- Vowel-elimination naming convention adopted in new code.
+- ruff + mypy clean across the codebase.
+
 ## [0.4.1] - 2026-05-11
 
 ### Added

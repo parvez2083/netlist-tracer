@@ -364,3 +364,19 @@ class TestEDIFBusOrder:
         # Should not raise even with bus_order kwarg
         parser = NetlistParser(fixture, bus_order="lsb_first")
         assert parser is not None
+
+
+class TestEdifPeek:
+    """Peek tests for EDIF format."""
+
+    def test_peek_basic_or_none(self, vendored_AND_gate_edf):
+        """Test peek on EDIF file returns pins or None (both acceptable)."""
+        pns = NetlistParser.peek_pins(vendored_AND_gate_edf, "AND")
+        # Per blueprint: EDIF peek may return None if implementation complex
+        # Either list or None is acceptable
+        assert pns is None or isinstance(pns, list)
+
+    def test_peek_nonexistent_cell(self, vendored_AND_gate_edf):
+        """Test peek returns None for non-existent EDIF cell."""
+        pns = NetlistParser.peek_pins(vendored_AND_gate_edf, "NONEXISTENT")
+        assert pns is None

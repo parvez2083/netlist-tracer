@@ -122,3 +122,27 @@ class TestSpectreSupplementary:
             assert inst.nets == ["net[0]", "net[1]", "plain_net"], (
                 f"Nets should be ['net[0]', 'net[1]', 'plain_net'], got {inst.nets}"
             )
+
+
+class TestSpectrePeek:
+    """Peek tests for Spectre format."""
+
+    def test_peek_basic(self, synthetic_spectre_basic_scs):
+        """Test peek on Spectre file returns expected pins."""
+        pns = NetlistParser.peek_pins(synthetic_spectre_basic_scs, "nand2_spectre")
+        assert pns is not None
+        assert len(pns) > 0
+        assert "Y" in pns
+
+    def test_peek_not_found(self, synthetic_spectre_basic_scs):
+        """Test peek returns None for non-existent subckt."""
+        pns = NetlistParser.peek_pins(synthetic_spectre_basic_scs, "NONEXISTENT")
+        assert pns is None
+
+    def test_peek_case_sensitive(self, synthetic_spectre_basic_scs):
+        """Test peek is case-sensitive for Spectre subckt names."""
+        pns_correct = NetlistParser.peek_pins(synthetic_spectre_basic_scs, "nand2_spectre")
+        pns_wrong = NetlistParser.peek_pins(synthetic_spectre_basic_scs, "NAND2_SPECTRE")
+        # Spectre subckt names are case-sensitive
+        assert pns_correct is not None
+        assert pns_wrong is None

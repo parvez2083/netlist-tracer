@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import logging
 import os
+import re
 import sys
 
 from netlist_tracer import __version__
@@ -100,6 +102,50 @@ def main() -> int:
         print(f"ERROR: Netlist file or directory not found: {netlist_file}")
         return 1
 
+    # Early-exit peek if both -cell and -pin provided
+    if start_name and pins is not None:
+        fmt_hnt = None if args.format == "auto" else args.format
+        pk_rslt = NetlistParser.peek_pins(netlist_file, start_name, fmt=fmt_hnt)
+
+        if pk_rslt is not None:
+            # Peek succeeded: check pin validity
+            pn_st = set(pk_rslt)
+            bus_bss = {
+                re.sub(r"\[\d+\]$|<\d+>$", "", p)
+                for p in pk_rslt
+                if re.search(r"\[\d+\]$|<\d+>$", p)
+            }
+
+            msng = []
+            for pn_csv in pins:
+                for pn in pn_csv.split(","):
+                    pn = pn.strip()
+                    if not pn:
+                        continue
+                    if pn in pn_st or pn in bus_bss:
+                        continue
+                    msng.append(pn)
+
+            if msng:
+                from netlist_tracer.tracer import suggest_pins
+
+                for pn in msng:
+                    print(
+                        f"ERROR: Pin '{pn}' not found in cell '{start_name}' (peek)",
+                        file=sys.stderr,
+                    )
+                    sgg = suggest_pins(pn, pk_rslt)
+                    if sgg:
+                        print(f"Did you mean: {sgg[:10]}", file=sys.stderr)
+                    else:
+                        print(
+                            f"Available pins ({len(pk_rslt)} total): "
+                            f"{pk_rslt[:10]}{'...' if len(pk_rslt) > 10 else ''}",
+                            file=sys.stderr,
+                        )
+                sys.exit(1)
+        # else: peek_result is None, fall through to full parse
+
     try:
         fmt = None if args.format == "auto" else args.format
         nl_parser = NetlistParser(
@@ -125,8 +171,6 @@ def main() -> int:
             file=sys.stderr,
         )
         # Suggest similar cell names using fuzzy matching
-        import difflib
-
         all_cells = list(nl_parser.subckts.keys())
         suggestions = difflib.get_close_matches(start_name, all_cells, n=10, cutoff=0.6)
         if suggestions:

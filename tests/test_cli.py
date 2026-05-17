@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from netlist_tracer import __version__
@@ -454,3 +455,52 @@ def test_cli_lib_unresolvable_returns_0_with_warning() -> None:
             f"Expected exit 0 (WARN+skip is a success); got {result.returncode}. "
             f"stdout={result.stdout!r} stderr={result.stderr!r}"
         )
+
+
+def test_cli_peek_invalid_pin_early_exit(synthetic_spice_basic_sp: str) -> None:
+    """Test CLI exits early with error when invalid pin provided during peek."""
+    # Call CLI with a valid cell and an invalid pin
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "netlist_tracer.cli.trace",
+            "-netlist",
+            synthetic_spice_basic_sp,
+            "-cell",
+            "nand2",
+            "-pin",
+            "INVALID_PIN",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    # Should exit with code 1 (error)
+    assert result.returncode == 1, f"Expected exit 1, got {result.returncode}"
+    # stderr should contain error message about pin not found
+    assert "Pin" in result.stderr or "pin" in result.stderr.lower()
+    assert "INVALID_PIN" in result.stderr or "not found" in result.stderr
+
+
+def test_cli_peek_valid_pin_no_regression(synthetic_spice_basic_sp: str) -> None:
+    """Test CLI with valid pin works same as before (no regression)."""
+    # Call CLI with valid cell and valid pin
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "netlist_tracer.cli.trace",
+            "-netlist",
+            synthetic_spice_basic_sp,
+            "-cell",
+            "nand2",
+            "-pin",
+            "Y",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    # Should succeed
+    assert result.returncode == 0, (
+        f"Expected exit 0 with valid pin; got {result.returncode}. stderr={result.stderr!r}"
+    )

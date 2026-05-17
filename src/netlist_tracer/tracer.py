@@ -42,6 +42,40 @@ def _spf_pin_from_net(net: str) -> str | None:
     return suffix
 
 
+_BUS_BRKT_RE = re.compile(r"(?:\[\d+\]|<\d+>)$")
+
+
+def suggest_pins(query: str, pins: list[str]) -> list[str]:
+    """Return ordered, deduplicated suggestion list for a not-found pin query.
+
+    Strategy:
+      1. Strip bus-bracket suffixes ([N], <N>) from each pin to get base names.
+      2. Case-insensitive substring containment: pins whose base contains the
+         query are listed first (catches short queries inside long pin names,
+         e.g. 'vref' inside 'bg_vrefOut_VDDA_ana').
+      3. Difflib fuzzy matches (cutoff 0.6) appended for typo handling, skipping
+         duplicates of the substring hits.
+
+    Used by both the tracer's pin-not-found path and the CLI's peek pre-validation
+    path so suggestion quality stays consistent across entry points.
+    """
+    import difflib
+
+    bases = list(dict.fromkeys(_BUS_BRKT_RE.sub("", p) for p in pins))
+    q = query.lower()
+    seen: set[str] = set()
+    sgg: list[str] = []
+    for b in bases:
+        if q in b.lower() and b not in seen:
+            seen.add(b)
+            sgg.append(b)
+    for s in difflib.get_close_matches(query, bases, n=10, cutoff=0.6):
+        if s not in seen:
+            seen.add(s)
+            sgg.append(s)
+    return sgg
+
+
 @dataclass
 class TraceStep:
     """Represents one step in a trace path."""
@@ -257,11 +291,6 @@ class BidirectionalTracer:
             if not subckt or start_pin not in subckt.pin_to_pos:
                 print(f"ERROR: Pin '{start_pin}' not found in cell '{start_cell}'", file=sys.stderr)
                 if subckt:
-                    import difflib
-
-                    def base(p: str) -> str:
-                        return re.sub(r"(?:\[\d+\]|<\d+>)$", "", p)
-
                     # NOTE: trace_pins() expands bare bus names via
                     # expand_pin() before reaching this point. This branch
                     # only fires when trace() is called directly (library
@@ -272,23 +301,12 @@ class BidirectionalTracer:
                         for p in subckt.pins
                         if p != start_pin
                         and re.search(r"(?:\[\d+\]|<\d+>)$", p)
-                        and base(p) == start_pin
+                        and _BUS_BRKT_RE.sub("", p) == start_pin
                     ]
                     if bus_members:
                         print(f"Did you mean: {bus_members[:10]}")
                     else:
-                        q = start_pin.lower()
-                        seen, suggestions = set(), []
-                        for p in subckt.pins:
-                            b = base(p)
-                            if q in b.lower() and b not in seen:
-                                seen.add(b)
-                                suggestions.append(b)
-                        bases = list(dict.fromkeys(base(p) for p in subckt.pins))
-                        for s in difflib.get_close_matches(start_pin, bases, n=10, cutoff=0.6):
-                            if s not in seen:
-                                seen.add(s)
-                                suggestions.append(s)
+                        suggestions = suggest_pins(start_pin, subckt.pins)
                         if suggestions:
                             print(f"Did you mean: {suggestions[:10]}")
                         else:
