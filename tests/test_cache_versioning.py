@@ -100,3 +100,270 @@ def test_unsupported_schema_version_raises() -> None:
         assert "newer than supported" in str(exc_info.value).lower()
         assert "99" in str(exc_info.value), "Error message should mention version 99"
         assert "update netlist-tracer" in str(exc_info.value).lower()
+
+
+def test_v3_instance_params_roundtrip() -> None:
+    """Verify v3 serialization preserves instance.params through dump/load cycle."""
+    from netlist_tracer.model import Instance, SubcktDef
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a parser with a synthetic Instance that has params
+        parser = NetlistParser.__new__(NetlistParser)
+        parser.filename = "synthetic"
+        parser.source_path = "synthetic"
+        parser.format = "spice"
+        parser.subckts = {"cell_with_params": SubcktDef(name="cell_with_params", pins=["a", "b"])}
+        parser.instances_by_parent = {
+            "top": [
+                Instance(
+                    name="x_test",
+                    cell_type="cell_with_params",
+                    nets=["net1", "net2"],
+                    parent_cell="top",
+                    params={"_value": "1830", "_merged_from": ["R1", "R2", "R3"]},
+                )
+            ]
+        }
+        parser.instances_by_celltype = {"cell_with_params": parser.instances_by_parent["top"]}
+        parser.instances_by_name = {"x_test": parser.instances_by_parent["top"]}
+        parser.global_nets = []
+
+        # Dump to JSON
+        out_path = Path(tmpdir) / "cache_with_params.json"
+        parser.dump_json(str(out_path))
+
+        # Verify 'params' field is in the instance entry
+        with open(out_path) as f:
+            data = json.load(f)
+        assert len(data["instances"]) == 1
+        inst_entry = data["instances"][0]
+        assert "params" in inst_entry, "Instance entry should have 'params' field"
+        assert inst_entry["params"]["_value"] == "1830"
+        assert inst_entry["params"]["_merged_from"] == ["R1", "R2", "R3"]
+
+        # Load back and verify params survived
+        reloaded = NetlistParser(str(out_path))
+        reloaded_inst = reloaded.instances_by_parent["top"][0]
+        assert reloaded_inst.params == {"_value": "1830", "_merged_from": ["R1", "R2", "R3"]}
+
+
+def test_v3_subckt_params_roundtrip() -> None:
+    """Verify v3 serialization preserves subckt.params through dump/load cycle."""
+    from netlist_tracer.model import SubcktDef
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a parser with a SubcktDef that has params
+        parser = NetlistParser.__new__(NetlistParser)
+        parser.filename = "synthetic"
+        parser.source_path = "synthetic"
+        parser.format = "verilog"
+        sub_with_params = SubcktDef(name="interface_mod", pins=["data", "clk", "rst"])
+        sub_with_params.params = {
+            "_kind": "interface",
+            "_modports": ["m"],
+            "_pin_directions": {"data": "output", "clk": "input"},
+        }
+        parser.subckts = {"interface_mod": sub_with_params}
+        parser.instances_by_parent = {}
+        parser.instances_by_celltype = {}
+        parser.instances_by_name = {}
+        parser.global_nets = []
+
+        # Dump to JSON
+        out_path = Path(tmpdir) / "cache_with_subckt_params.json"
+        parser.dump_json(str(out_path))
+
+        # Verify 'subckt_params' field is in top-level output
+        with open(out_path) as f:
+            data = json.load(f)
+        assert "subckt_params" in data, "Top-level should have 'subckt_params' field"
+        assert "interface_mod" in data["subckt_params"]
+        assert data["subckt_params"]["interface_mod"]["_kind"] == "interface"
+        assert data["subckt_params"]["interface_mod"]["_modports"] == ["m"]
+        assert data["subckt_params"]["interface_mod"]["_pin_directions"] == {
+            "data": "output",
+            "clk": "input",
+        }
+
+        # Load back and verify params survived
+        reloaded = NetlistParser(str(out_path))
+        reloaded_sub = reloaded.subckts["interface_mod"]
+        assert reloaded_sub.params["_kind"] == "interface"
+        assert reloaded_sub.params["_modports"] == ["m"]
+        assert reloaded_sub.params["_pin_directions"] == {"data": "output", "clk": "input"}
+
+
+def test_v3_empty_params_omitted() -> None:
+    """Verify that empty params are omitted from JSON to keep cache compact."""
+    from netlist_tracer.model import Instance, SubcktDef
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a parser with instances and subckts that have empty params
+        parser = NetlistParser.__new__(NetlistParser)
+        parser.filename = "synthetic"
+        parser.source_path = "synthetic"
+        parser.format = "verilog"
+        parser.subckts = {
+            "simple_cell": SubcktDef(name="simple_cell", pins=["a", "b"]),
+            "another_cell": SubcktDef(name="another_cell", pins=["x", "y"]),
+        }
+        parser.instances_by_parent = {
+            "top": [
+                Instance(
+                    name="x1",
+                    cell_type="simple_cell",
+                    nets=["n1", "n2"],
+                    parent_cell="top",
+                    params={},
+                ),
+                Instance(
+                    name="x2",
+                    cell_type="another_cell",
+                    nets=["n3", "n4"],
+                    parent_cell="top",
+                    params={},
+                ),
+            ]
+        }
+        parser.instances_by_celltype = {
+            "simple_cell": [parser.instances_by_parent["top"][0]],
+            "another_cell": [parser.instances_by_parent["top"][1]],
+        }
+        parser.instances_by_name = {
+            "x1": [parser.instances_by_parent["top"][0]],
+            "x2": [parser.instances_by_parent["top"][1]],
+        }
+        parser.global_nets = []
+
+        # Dump to JSON
+        out_path = Path(tmpdir) / "cache_empty_params.json"
+        parser.dump_json(str(out_path))
+
+        # Verify 'params' field is NOT in instance entries (empty params omitted)
+        with open(out_path) as f:
+            data = json.load(f)
+        for inst_entry in data["instances"]:
+            assert "params" not in inst_entry, (
+                f"Instance {inst_entry['name']} should not have 'params' field when empty"
+            )
+
+        # Verify 'subckt_params' is NOT in top-level when all subckts have empty params
+        assert "subckt_params" not in data, (
+            "Top-level should not have 'subckt_params' field when all subckts have empty params"
+        )
+
+
+def test_v2_cache_still_loads() -> None:
+    """Verify backward compatibility: v2 cache (with schema_version=2) loads correctly."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a v2 JSON cache (no instance params, no subckt_params)
+        v2_cache = {
+            "schema_version": 2,
+            "format": "spice",
+            "source": "/tmp/test.sp",
+            "subckts": {
+                "nand2": ["A", "B", "Y", "VDD", "GND"],
+                "inv": ["IN", "OUT", "VDD", "GND"],
+            },
+            "instances": [
+                {
+                    "name": "x_nand",
+                    "cell_type": "nand2",
+                    "nets": ["n1", "n2", "n3", "VDD", "GND"],
+                    "parent_cell": "top",
+                },
+                {
+                    "name": "x_inv",
+                    "cell_type": "inv",
+                    "nets": ["n3", "n4", "VDD", "GND"],
+                    "parent_cell": "top",
+                },
+            ],
+            "aliases": {},
+        }
+        cache_path = Path(tmpdir) / "v2_cache.json"
+        with open(cache_path, "w") as f:
+            json.dump(v2_cache, f)
+
+        # Load the v2 cache — should succeed
+        parser = NetlistParser(str(cache_path))
+
+        # Verify the data was loaded correctly and instances have empty params (default)
+        assert "nand2" in parser.subckts
+        assert "inv" in parser.subckts
+        assert len(parser.instances_by_parent["top"]) == 2
+        for inst in parser.instances_by_parent["top"]:
+            assert inst.params == {}, f"Instance {inst.name} should have empty params as default"
+
+
+def test_v3_spf_merged_R_roundtrip() -> None:
+    """Integration test: parse a small DSPF, serialize v3, reload, verify params survive.
+
+    This test is marked as local (environment-gated) to run only when
+    NETLIST_TRACER_SPF_SAMPLE is set.
+    """
+    import os
+
+    spf_sample = os.environ.get("NETLIST_TRACER_SPF_SAMPLE")
+    if not spf_sample or not os.path.exists(spf_sample):
+        pytest.skip("NETLIST_TRACER_SPF_SAMPLE not set or file does not exist")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Parse the SPF file (should populate instance.params with _value, _merged_from, etc.)
+        parser = NetlistParser(spf_sample)
+
+        # Find an instance with params before dump (snapshot original state)
+        # Find the top-level cell (parent with most instances)
+        top = max(
+            parser.instances_by_parent.keys(), key=lambda k: len(parser.instances_by_parent[k])
+        )
+        # Prefer instances with both _value and _merged_from
+        orig_merged = next(
+            (
+                i
+                for i in parser.instances_by_parent.get(top, [])
+                if i.params.get("_value") and i.params.get("_merged_from")
+            ),
+            None,
+        )
+        if orig_merged is None:
+            # Fallback to any instance with _value
+            orig_merged = next(
+                (i for i in parser.instances_by_parent.get(top, []) if i.params.get("_value")),
+                None,
+            )
+        if orig_merged is None:
+            pytest.skip("No instances with _value found in SPF")
+
+        orig_value = orig_merged.params.get("_value")
+        orig_merged_from = orig_merged.params.get("_merged_from")
+        orig_name = orig_merged.name
+
+        # Dump to JSON (v3)
+        cache_path = Path(tmpdir) / "spf_cache_v3.json"
+        parser.dump_json(str(cache_path))
+
+        # Verify v3 structure: check for instances with params
+        with open(cache_path) as f:
+            data = json.load(f)
+        assert data["schema_version"] == 3
+        instances_with_params = [i for i in data["instances"] if "params" in i]
+        assert len(instances_with_params) > 0, (
+            "Expected some instances with params from SPF parsing"
+        )
+
+        # Reload and verify params are intact and match originals
+        reloaded = NetlistParser(str(cache_path))
+        reloaded_merged = next(
+            (i for i in reloaded.instances_by_parent.get(top, []) if i.name == orig_name),
+            None,
+        )
+        assert reloaded_merged is not None, f"Reloaded instance {orig_name} not found"
+        assert reloaded_merged.params.get("_value") == orig_value, (
+            f"Reloaded _value {reloaded_merged.params.get('_value')} != original {orig_value}"
+        )
+        # Verify _merged_from is preserved if it was present in original
+        if orig_merged_from is not None:
+            assert reloaded_merged.params.get("_merged_from") == orig_merged_from, (
+                f"Reloaded _merged_from {reloaded_merged.params.get('_merged_from')} != original {orig_merged_from}"
+            )

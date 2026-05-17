@@ -21,7 +21,7 @@ from netlist_tracer.parsers.verilog.specialize import _sv_assemble, _sv_speciali
 
 _logger = get_logger(__name__)
 
-_CACHE_SCHEMA_VERSION = 2
+_CACHE_SCHEMA_VERSION = 3
 
 # Format priority ranking for collision resolution (higher = wins on name conflict)
 _FORMAT_PRIORITY = {
@@ -423,9 +423,9 @@ class NetlistParser:
         """Load pre-parsed netlist data from JSON cache.
 
         Supports v0 (legacy, no schema_version field), v1 (aliases as
-        list of [lhs, rhs] pairs), and v2 (aliases as dict, compact
-        encoding). Raises NetlistParseError if schema_version is newer
-        than supported.
+        list of [lhs, rhs] pairs), v2 (aliases as dict, compact encoding),
+        and v3 (includes instance.params and subckt_params dicts). Raises
+        NetlistParseError if schema_version is newer than supported.
         """
         with open(filepath) as f:
             data = json.load(f)
@@ -445,6 +445,8 @@ class NetlistParser:
         _logger.info(f"Loading pre-parsed cache: {filepath}")
         _logger.info(f"Source: {self.source_path}")
 
+        sbckt_prms_map = data.get("subckt_params", {})
+
         for name, entry in data["subckts"].items():
             if isinstance(entry, dict):
                 pins = entry.get("pins", [])
@@ -455,6 +457,9 @@ class NetlistParser:
                 self.subckts[name] = sub
             else:
                 self.subckts[name] = SubcktDef(name=name, pins=entry)
+            # Assign params from subckt_params dict if present
+            if name in sbckt_prms_map:
+                self.subckts[name].params = dict(sbckt_prms_map[name])
 
         for cell, pairs in (data.get("aliases") or {}).items():
             subckt: SubcktDef | None = self.subckts.get(cell)
@@ -464,14 +469,16 @@ class NetlistParser:
                 merge_aliases_into_subckt(subckt, items)
 
         for inst_data in data["instances"]:
-            self._add_instance(
-                Instance(
-                    name=inst_data["name"],
-                    cell_type=inst_data["cell_type"],
-                    nets=inst_data["nets"],
-                    parent_cell=inst_data["parent_cell"],
-                )
+            inst = Instance(
+                name=inst_data["name"],
+                cell_type=inst_data["cell_type"],
+                nets=inst_data["nets"],
+                parent_cell=inst_data["parent_cell"],
             )
+            # Assign params from instance entry if present (v3+); default to empty dict
+            if "params" in inst_data:
+                inst.params = dict(inst_data["params"])
+            self._add_instance(inst)
 
     def _parse_spice(self, filepath: str) -> tuple[dict[str, SubcktDef], list[Instance], list[str]]:
         """Parse SPICE/CDL netlist and return results without mutation.
@@ -607,6 +614,10 @@ class NetlistParser:
         Output is compact (no indentation) and machine-oriented. Use
         `python3 -m json.tool < cache.json` to inspect by eye.
 
+        Schema version (v3) adds:
+          - Instance entries now include 'params' field when non-empty (omitted when empty)
+          - Top-level 'subckt_params' dict maps subckt name -> params dict for subckts with non-empty params
+
         Schema version (v2) differences vs older caches the loader still
         understands (v0/v1):
           - Aliases stored as dict {lhs: rhs} (was list of [lhs, rhs] pairs)
@@ -623,11 +634,13 @@ class NetlistParser:
                 "cell_type": inst.cell_type,
                 "nets": inst.nets,
                 "parent_cell": inst.parent_cell,
+                **({"params": dict(inst.params)} if inst.params else {}),
             }
             for insts in self.instances_by_parent.values()
             for inst in insts
         ]
         aliases_out = {name: dict(sub.aliases) for name, sub in self.subckts.items() if sub.aliases}
+        sbckt_prms = {name: dict(sub.params) for name, sub in self.subckts.items() if sub.params}
         output = {
             "schema_version": _CACHE_SCHEMA_VERSION,
             "format": self.format,
@@ -636,6 +649,8 @@ class NetlistParser:
             "instances": instances_out,
             "aliases": aliases_out,
         }
+        if sbckt_prms:
+            output["subckt_params"] = sbckt_prms
         out_dir = os.path.dirname(os.path.abspath(out_path))
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
