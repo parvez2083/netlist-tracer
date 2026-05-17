@@ -1,15 +1,153 @@
-"""Tests for EDIF parser improvements: rename, properties, libraries, bus_order."""
+"""Regression tests for EDIF parser against golden baselines."""
 
 from __future__ import annotations
 
+import json
 import os
+from typing import Any
 
 import pytest
 
 from netlist_tracer import NetlistParser
 from netlist_tracer.exceptions import NetlistParseError
 
-FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "synthetic")
+FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "vendored")
+GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "golden")
+SYNTHETIC_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "synthetic")
+
+
+def parser_snapshot(parser: NetlistParser) -> dict[str, Any]:
+    """Serialize a deterministic, comparable view of parser state."""
+    subckts_view: dict[str, dict[str, Any]] = {}
+    for name in sorted(parser.subckts.keys()):
+        sub = parser.subckts[name]
+        subckts_view[name] = {
+            "pins": list(sub.pins),
+            "pin_count": len(sub.pins),
+            "alias_count": len(sub.aliases),
+            "child_instance_count": len(parser.instances_by_parent.get(name, [])),
+        }
+    total_instances = sum(len(v) for v in parser.instances_by_parent.values())
+    return {
+        "format": parser.format,
+        "subckt_count": len(parser.subckts),
+        "total_instance_count": total_instances,
+        "subckt_names_sorted": sorted(parser.subckts.keys()),
+        "subckts": subckts_view,
+    }
+
+
+@pytest.mark.slow
+class TestEDIFRegression:
+    """EDIF parsing regression tests against golden baselines."""
+
+    def test_AND_gate_parsing_regression(self) -> None:
+        """Parse AND_gate.edf and match golden baseline snapshot."""
+        fixture = os.path.join(FIXTURES_DIR, "AND_gate.edf")
+        parser = NetlistParser(fixture)
+        snapshot = parser_snapshot(parser)
+
+        golden_file = os.path.join(GOLDEN_DIR, "AND_gate_baseline.json")
+        with open(golden_file) as f:
+            golden = json.load(f)
+
+        assert snapshot == golden["parser"]
+
+    def test_AND_gate_tracing_regression(self) -> None:
+        """Trace AND_gate.edf and match golden baseline."""
+        from netlist_tracer import BidirectionalTracer, format_path
+
+        fixture = os.path.join(FIXTURES_DIR, "AND_gate.edf")
+        parser = NetlistParser(fixture)
+        tracer = BidirectionalTracer(parser)
+
+        paths = tracer.trace("logic_gate", "a")
+        seen = set()
+        unique_formatted: list[str] = []
+        for path in paths:
+            sig = format_path(path)
+            if sig in seen:
+                continue
+            seen.add(sig)
+            unique_formatted.append(sig)
+
+        golden_file = os.path.join(GOLDEN_DIR, "AND_gate_baseline.json")
+        with open(golden_file) as f:
+            golden = json.load(f)
+
+        assert unique_formatted == golden["trace"]["paths"]
+
+    def test_n_bit_counter_parsing_regression(self) -> None:
+        """Parse n_bit_counter.edf and match golden baseline."""
+        fixture = os.path.join(FIXTURES_DIR, "n_bit_counter.edf")
+        parser = NetlistParser(fixture)
+        snapshot = parser_snapshot(parser)
+
+        golden_file = os.path.join(GOLDEN_DIR, "n_bit_counter_baseline.json")
+        with open(golden_file) as f:
+            golden = json.load(f)
+
+        assert snapshot == golden["parser"]
+
+    def test_n_bit_counter_tracing_regression(self) -> None:
+        """Trace n_bit_counter.edf and match golden baseline."""
+        from netlist_tracer import BidirectionalTracer, format_path
+
+        fixture = os.path.join(FIXTURES_DIR, "n_bit_counter.edf")
+        parser = NetlistParser(fixture)
+        tracer = BidirectionalTracer(parser)
+
+        paths = tracer.trace("n_bit_counter", "clk")
+        seen = set()
+        unique_formatted: list[str] = []
+        for path in paths:
+            sig = format_path(path)
+            if sig in seen:
+                continue
+            seen.add(sig)
+            unique_formatted.append(sig)
+
+        golden_file = os.path.join(GOLDEN_DIR, "n_bit_counter_baseline.json")
+        with open(golden_file) as f:
+            golden = json.load(f)
+
+        assert unique_formatted == golden["trace"]["paths"]
+
+    def test_one_counter_parsing_regression(self) -> None:
+        """Parse one_counter.edf and match golden baseline."""
+        fixture = os.path.join(FIXTURES_DIR, "one_counter.edf")
+        parser = NetlistParser(fixture)
+        snapshot = parser_snapshot(parser)
+
+        golden_file = os.path.join(GOLDEN_DIR, "one_counter_baseline.json")
+        with open(golden_file) as f:
+            golden = json.load(f)
+
+        assert snapshot == golden["parser"]
+
+    def test_one_counter_tracing_regression(self) -> None:
+        """Trace one_counter.edf and match golden baseline."""
+        from netlist_tracer import BidirectionalTracer, format_path
+
+        fixture = os.path.join(FIXTURES_DIR, "one_counter.edf")
+        parser = NetlistParser(fixture)
+        tracer = BidirectionalTracer(parser)
+
+        paths = tracer.trace("one_counter", "XP_PCLK")
+        seen = set()
+        unique_formatted: list[str] = []
+        for path in paths:
+            sig = format_path(path)
+            if sig in seen:
+                continue
+            seen.add(sig)
+            unique_formatted.append(sig)
+
+        golden_file = os.path.join(GOLDEN_DIR, "one_counter_baseline.json")
+        with open(golden_file) as f:
+            golden = json.load(f)
+
+        assert unique_formatted == golden["trace"]["paths"]
 
 
 class TestEDIFRename:
@@ -17,7 +155,7 @@ class TestEDIFRename:
 
     def test_edif_rename_preserves_original(self) -> None:
         """Parse EDIF cell with (rename safe \"original\") and verify original name captured."""
-        fixture = os.path.join(FIXTURES_DIR, "edif_with_rename.edif")
+        fixture = os.path.join(SYNTHETIC_DIR, "edif_with_rename.edif")
         parser = NetlistParser(fixture)
 
         # Check cell-level rename
@@ -27,7 +165,7 @@ class TestEDIFRename:
 
     def test_edif_no_rename_no_original_name_key(self) -> None:
         """Parse EDIF cell without rename; _edif_original_name key absent."""
-        fixture = os.path.join(FIXTURES_DIR, "edif_multi_library.edif")
+        fixture = os.path.join(SYNTHETIC_DIR, "edif_multi_library.edif")
         parser = NetlistParser(fixture)
 
         # INV and BUF cells have no rename
@@ -41,7 +179,7 @@ class TestEDIFRename:
 
     def test_edif_instance_rename_preserved(self) -> None:
         """Parse EDIF instance with (rename safe \"original\") and verify captured."""
-        fixture = os.path.join(FIXTURES_DIR, "edif_with_rename.edif")
+        fixture = os.path.join(SYNTHETIC_DIR, "edif_with_rename.edif")
         parser = NetlistParser(fixture)
 
         # Find instance u1_safe
@@ -56,7 +194,7 @@ class TestEDIFProperties:
 
     def test_edif_property_string(self) -> None:
         """Parse EDIF property with string value."""
-        fixture = os.path.join(FIXTURES_DIR, "edif_with_properties.edif")
+        fixture = os.path.join(SYNTHETIC_DIR, "edif_with_properties.edif")
         parser = NetlistParser(fixture)
 
         cell = parser.subckts.get("PROP_TEST")
@@ -66,7 +204,7 @@ class TestEDIFProperties:
 
     def test_edif_property_integer(self) -> None:
         """Parse EDIF property with integer value."""
-        fixture = os.path.join(FIXTURES_DIR, "edif_with_properties.edif")
+        fixture = os.path.join(SYNTHETIC_DIR, "edif_with_properties.edif")
         parser = NetlistParser(fixture)
 
         cell = parser.subckts.get("PROP_TEST")
@@ -77,7 +215,7 @@ class TestEDIFProperties:
 
     def test_edif_property_real(self) -> None:
         """Parse EDIF property with real value."""
-        fixture = os.path.join(FIXTURES_DIR, "edif_with_properties.edif")
+        fixture = os.path.join(SYNTHETIC_DIR, "edif_with_properties.edif")
         parser = NetlistParser(fixture)
 
         cell = parser.subckts.get("PROP_TEST")
@@ -87,7 +225,7 @@ class TestEDIFProperties:
 
     def test_edif_property_boolean(self) -> None:
         """Parse EDIF property with boolean value."""
-        fixture = os.path.join(FIXTURES_DIR, "edif_with_properties.edif")
+        fixture = os.path.join(SYNTHETIC_DIR, "edif_with_properties.edif")
         parser = NetlistParser(fixture)
 
         cell = parser.subckts.get("PROP_TEST")
@@ -98,7 +236,7 @@ class TestEDIFProperties:
 
     def test_edif_instance_properties(self) -> None:
         """Parse EDIF instance properties."""
-        fixture = os.path.join(FIXTURES_DIR, "edif_with_properties.edif")
+        fixture = os.path.join(SYNTHETIC_DIR, "edif_with_properties.edif")
         parser = NetlistParser(fixture)
 
         instances = parser.instances_by_name.get("I1", [])
@@ -114,7 +252,7 @@ class TestEDIFLibrary:
 
     def test_edif_library_recorded(self) -> None:
         """Parse EDIF and verify _edif_library param recorded."""
-        fixture = os.path.join(FIXTURES_DIR, "edif_multi_library.edif")
+        fixture = os.path.join(SYNTHETIC_DIR, "edif_multi_library.edif")
         parser = NetlistParser(fixture)
 
         inv = parser.subckts.get("INV")
@@ -127,7 +265,7 @@ class TestEDIFLibrary:
 
     def test_edif_multi_library_collision_warns(self, caplog) -> None:
         """Parse EDIF with same cell in multiple libraries; warning logged, first-encountered wins."""
-        fixture = os.path.join(FIXTURES_DIR, "edif_multi_library_collision.edif")
+        fixture = os.path.join(SYNTHETIC_DIR, "edif_multi_library_collision.edif")
 
         # Capture log output
         import logging
@@ -154,7 +292,7 @@ class TestEDIFBusOrder:
 
     def test_edif_bus_order_default_msb_first(self) -> None:
         """Parse EDIF bus array with default bus_order='msb_first'."""
-        fixture = os.path.join(FIXTURES_DIR, "edif_bus_array.edif")
+        fixture = os.path.join(SYNTHETIC_DIR, "edif_bus_array.edif")
         parser = NetlistParser(fixture)
 
         cell = parser.subckts.get("BUS_TEST")
@@ -176,7 +314,7 @@ class TestEDIFBusOrder:
 
     def test_edif_bus_order_lsb_first(self) -> None:
         """Parse EDIF bus array with bus_order='lsb_first'."""
-        fixture = os.path.join(FIXTURES_DIR, "edif_bus_array.edif")
+        fixture = os.path.join(SYNTHETIC_DIR, "edif_bus_array.edif")
         parser = NetlistParser(fixture, bus_order="lsb_first")
 
         cell = parser.subckts.get("BUS_TEST")
@@ -198,14 +336,14 @@ class TestEDIFBusOrder:
 
     def test_edif_bus_order_invalid_raises(self) -> None:
         """Parse with invalid bus_order value raises NetlistParseError."""
-        fixture = os.path.join(FIXTURES_DIR, "edif_bus_array.edif")
+        fixture = os.path.join(SYNTHETIC_DIR, "edif_bus_array.edif")
 
         with pytest.raises(NetlistParseError, match="Invalid bus_order"):
             NetlistParser(fixture, bus_order="invalid_order")
 
     def test_netlist_parser_bus_order_kwarg(self) -> None:
         """NetlistParser accepts bus_order kwarg and threads it to EDIF parser."""
-        fixture = os.path.join(FIXTURES_DIR, "edif_bus_array.edif")
+        fixture = os.path.join(SYNTHETIC_DIR, "edif_bus_array.edif")
         parser_msb = NetlistParser(fixture, bus_order="msb_first")
         parser_lsb = NetlistParser(fixture, bus_order="lsb_first")
 
@@ -222,7 +360,7 @@ class TestEDIFBusOrder:
     def test_netlist_parser_bus_order_ignored_for_non_edif(self) -> None:
         """bus_order kwarg silently ignored for non-EDIF files."""
         # Use a Verilog fixture (should not raise)
-        fixture = os.path.join(FIXTURES_DIR, "simple.spf")
+        fixture = os.path.join(SYNTHETIC_DIR, "simple.spf")
         # Should not raise even with bus_order kwarg
         parser = NetlistParser(fixture, bus_order="lsb_first")
         assert parser is not None
