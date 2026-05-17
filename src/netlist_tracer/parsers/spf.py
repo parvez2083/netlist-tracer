@@ -8,6 +8,8 @@ import re
 from netlist_tracer._logging import get_logger
 from netlist_tracer.exceptions import NetlistParseError
 from netlist_tracer.model import Instance, SubcktDef
+from netlist_tracer.parsers._numerics import parse_numerical
+from netlist_tracer.parsers.spice import _parse_spice_instance
 
 _logger = get_logger(__name__)
 
@@ -83,21 +85,21 @@ def _scan_spf_header(lines: list[str]) -> SpfState:
 
 def _normalize_subnode_net(net: str, delimiter: str) -> str:
     """
-    Collapse subnode form 'parent:N' to 'parent' for tracer purposes.
+    Identity pass-through for net names. Numeric subnodes (e.g., 'clk_in:20')
+    are REAL intermediate nodes in the parasitic R-network and must be preserved.
 
-    Only the LAST occurrence of delimiter is treated as subnode marker.
-    Idempotent.
+    The function is kept (rather than removed) so callers don't have to change
+    and future format-specific normalization can plug in here. The series-R
+    reduction pass (_reduce_series_resistors) handles tracer ergonomics by
+    merging purely-series R chains into single equivalent resistors.
 
     Inputs:
         net: Net name as it appears on element line
-        delimiter: Delimiter char from *|DELIMITER (default ':')
+        delimiter: Delimiter char from *|DELIMITER (default ':', unused)
 
     Outputs:
-        Normalized net name
+        net (unchanged)
     """
-    idx = net.rfind(delimiter)
-    if idx >= 0:
-        return net[:idx]
     return net
 
 
@@ -173,7 +175,11 @@ def _parse_spf_directive(line: str, stt: SpfState, crnt_sbckt: SubcktDef | None)
         return
 
     # Silently consume header directives already handled in _scan_spf_header
-    if re.match(r"\*\|(DIVIDER|DELIMITER|DESIGN|DATE|VENDOR|PROGRAM|VERSION)", line):
+    # and the format-marker line itself (*|DSPF/RSPF/CCSPF <version>).
+    if re.match(
+        r"\*\|(DSPF|RSPF|CCSPF|DIVIDER|DELIMITER|DESIGN|DATE|VENDOR|PROGRAM|VERSION)\b",
+        line,
+    ):
         return
 
     # Unknown *|* directive: log warning
@@ -312,7 +318,7 @@ def _parse_spf_element_line(
     elem_name = tokens[0]
     elem_type = elem_name[0].upper()
 
-    # R element: R<name> n1 n2 value
+    # R element: R<name> n1 n2 value  (value captured into params['_value'])
     if elem_type == "R":
         if len(tokens) >= 4:
             n1 = _normalize_subnode_net(tokens[1], stt.delimiter)
@@ -323,10 +329,11 @@ def _parse_spf_element_line(
                     cell_type="R",
                     nets=[n1, n2],
                     parent_cell=prnt_sbckt,
+                    params={"_value": tokens[3]},
                 )
             )
 
-    # C element: C<name> n1 n2 value
+    # C element: C<name> n1 n2 value  (value captured into params['_value'])
     elif elem_type == "C":
         if len(tokens) >= 4:
             n1 = _normalize_subnode_net(tokens[1], stt.delimiter)
@@ -337,10 +344,11 @@ def _parse_spf_element_line(
                     cell_type="C",
                     nets=[n1, n2],
                     parent_cell=prnt_sbckt,
+                    params={"_value": tokens[3]},
                 )
             )
 
-    # L element: L<name> n1 n2 value
+    # L element: L<name> n1 n2 value  (value captured into params['_value'])
     elif elem_type == "L":
         if len(tokens) >= 4:
             n1 = _normalize_subnode_net(tokens[1], stt.delimiter)
@@ -351,6 +359,7 @@ def _parse_spf_element_line(
                     cell_type="L",
                     nets=[n1, n2],
                     parent_cell=prnt_sbckt,
+                    params={"_value": tokens[3]},
                 )
             )
 
@@ -371,20 +380,202 @@ def _parse_spf_element_line(
                 )
             )
 
-    # X element (subckt instance): X<name> net1 net2 ... celltype
+    # X element (subckt instance): X<name> net1 net2 ... celltype [params...]
     elif elem_type == "X":
-        if len(tokens) >= 3:
-            # Last token is cell type; rest before it are nets
-            celltype = tokens[-1]
-            nets = [_normalize_subnode_net(t, stt.delimiter) for t in tokens[1:-1]]
-            insts.append(
-                Instance(
-                    name=elem_name,
-                    cell_type=celltype,
-                    nets=nets,
-                    parent_cell=prnt_sbckt,
-                )
-            )
+        inst = _parse_spice_instance(line, prnt_sbckt)
+        if inst is not None:
+            # Apply numeric-only subnode normalization to nets
+            inst.nets = [_normalize_subnode_net(n, stt.delimiter) for n in inst.nets]
+            insts.append(inst)
+
+
+################################################################################
+# SECTION: Series-R Reduction
+# Description: Post-parse reduction of purely-series R chains into merged
+# equivalent resistors with summed values.
+################################################################################
+
+
+def _reduce_series_resistors(
+    sbckts: dict[str, SubcktDef], insts: list[Instance], top_cell: str
+) -> list[Instance]:
+    """
+    Iteratively merge purely-series R chains in instances under top_cell.
+
+    Returns a NEW instances list (caller replaces). Other-parent instances
+    pass through unchanged. Merged R instances have:
+      - name: '<first_R>_to_<last_R>'
+      - cell_type: 'R'
+      - params['_value']: summed value (formatted with :g)
+      - params['_merged_from']: ordered list of original R names in chain order
+      - params['_chain_endpoints']: tuple (surviving_a_end, surviving_b_end)
+
+    Inputs:
+        sbckts: Subckt dict from _parse_spf_body
+        insts: Full instance list (all parent_cells)
+        top_cell: Name of the top subckt; only instances with parent_cell == top_cell
+                  are eligible for reduction
+
+    Outputs:
+        New list of Instance objects: instances under other parents pass through;
+        instances under top_cell have purely-series R chains collapsed
+    """
+    # Partition instances by parent_cell
+    own_insts = [i for i in insts if i.parent_cell == top_cell]
+    non_own_insts = [i for i in insts if i.parent_cell != top_cell]
+
+    # Get port nets from top_cell (must never be merged out)
+    port_nets = set(sbckts[top_cell].pins) if top_cell in sbckts else set()
+
+    # Build net-to-instances index for top_cell using id() for fast removal
+    net_to_insts: dict[str, list[Instance]] = {}
+    for inst in own_insts:
+        for net in inst.nets:
+            if net not in net_to_insts:
+                net_to_insts[net] = []
+            net_to_insts[net].append(inst)
+
+    # Seed worklist with all non-port nets
+    wrklst = set(net_to_insts.keys()) - port_nets
+
+    mrg_cnt = 0
+    deleted_insts = set()  # Track deleted instance ids for fast lookup
+
+    # Worklist-driven merge loop
+    while wrklst:
+        net = wrklst.pop()
+
+        # Skip if net is a port or has no instances
+        if net in port_nets or net not in net_to_insts:
+            continue
+
+        insts_here = net_to_insts[net]
+
+        # Filter R's and non-mergeable instances, skipping deleted ones
+        r_insts = [i for i in insts_here if i.cell_type == "R" and id(i) not in deleted_insts]
+        non_mrgbl = [
+            i
+            for i in insts_here
+            if i.cell_type not in ("R", "C", "K") and id(i) not in deleted_insts
+        ]
+
+        # Only merge if exactly 2 R's and no transistors/sources
+        if len(r_insts) != 2 or non_mrgbl:
+            continue
+
+        r1, r2 = r_insts
+
+        # Find other-terminal nets (the net NOT on the merged-out side)
+        a = next((n for n in r1.nets if n != net), None)
+        b = next((n for n in r2.nets if n != net), None)
+
+        # Skip if either is None, or if they form a self-loop on r1/r2
+        if a is None or b is None or a == net or b == net:
+            continue
+
+        # Skip if parallel (both R's span the same two nets)
+        if a == b:
+            continue
+
+        # Parse values
+        v1 = parse_numerical(r1.params.get("_value", "0"))
+        v2 = parse_numerical(r2.params.get("_value", "0"))
+
+        if v1 is None or v2 is None:
+            _logger.warning(f"Could not parse R value for {r1.name} or {r2.name}; skipping merge")
+            continue
+
+        # Determine chain endpoints
+        # Convention: endpoints align with nets indices
+        # If r1 has _chain_endpoints, it's a previous merge; otherwise it's a single R
+        r1_eps = r1.params.get("_chain_endpoints")
+        if r1_eps:
+            # r1_eps = (endpoint_on_nets[0], endpoint_on_nets[1])
+            # net is one of r1.nets; find which
+            if r1.nets[0] == net:
+                # net is on nets[0] side, so surviving endpoint is on nets[1] side
+                a_end = r1_eps[1]
+            else:
+                # net is on nets[1] side, so surviving endpoint is on nets[0] side
+                a_end = r1_eps[0]
+        else:
+            # Single R: both endpoints are the name
+            a_end = r1.name
+
+        r2_eps = r2.params.get("_chain_endpoints")
+        if r2_eps:
+            # net is one of r2.nets; find which
+            if r2.nets[0] == net:
+                # net is on nets[0] side, so surviving endpoint is on nets[1] side
+                b_end = r2_eps[1]
+            else:
+                # net is on nets[1] side, so surviving endpoint is on nets[0] side
+                b_end = r2_eps[0]
+        else:
+            # Single R: both endpoints are the name
+            b_end = r2.name
+
+        # Construct merged R name (deterministic: sorted endpoints)
+        sorted_endpoints = sorted([a_end, b_end])
+        new_nm = f"{sorted_endpoints[0]}_to_{sorted_endpoints[1]}"
+
+        # Construct merged_from list: order by direction from a to net to b
+        r1_mrgd_from = r1.params.get("_merged_from") or [r1.name]
+        r2_mrgd_from = r2.params.get("_merged_from") or [r2.name]
+
+        # Determine order: does r1 go from a->net or net->a?
+        if r1.nets[0] == net:
+            # r1 is net->a, so reverse it to get a->net
+            new_mrgd_from = list(reversed(r1_mrgd_from)) + r2_mrgd_from
+        else:
+            # r1 is a->net, so keep it
+            new_mrgd_from = r1_mrgd_from + r2_mrgd_from
+
+        # Sum values
+        new_val = v1 + v2
+        new_val_str = f"{new_val:g}"
+
+        # Create merged R instance
+        new_inst = Instance(
+            name=new_nm,
+            cell_type="R",
+            nets=[a, b],
+            parent_cell=top_cell,
+            params={
+                "_value": new_val_str,
+                "_merged_from": new_mrgd_from,
+                "_chain_endpoints": (a_end, b_end),
+            },
+        )
+
+        # Mark r1 and r2 as deleted
+        deleted_insts.add(id(r1))
+        deleted_insts.add(id(r2))
+
+        # Append new merged instance
+        own_insts.append(new_inst)
+
+        # Add new instance to nets a and b in the index
+        if a not in net_to_insts:
+            net_to_insts[a] = []
+        net_to_insts[a].append(new_inst)
+
+        if b not in net_to_insts:
+            net_to_insts[b] = []
+        net_to_insts[b].append(new_inst)
+
+        # Re-add a and b to worklist for further merging
+        wrklst.add(a)
+        wrklst.add(b)
+
+        mrg_cnt += 1
+
+    if mrg_cnt > 0:
+        _logger.info(f"series-R reduction: merged {mrg_cnt} chains in {top_cell}")
+
+    # Filter out deleted instances from own_insts before returning
+    result = non_own_insts + [i for i in own_insts if id(i) not in deleted_insts]
+    return result
 
 
 ################################################################################
@@ -438,5 +629,9 @@ def parse_spf(
 
     if not sbckts:
         raise NetlistParseError(f"No .SUBCKT found in SPF file: {filepath}")
+
+    # Apply series-R reduction as post-parse pass
+    top_cell = next(iter(sbckts))
+    insts = _reduce_series_resistors(sbckts, insts, top_cell)
 
     return sbckts, insts, []

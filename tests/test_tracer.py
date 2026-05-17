@@ -244,3 +244,55 @@ def test_trace_pins_expands_angle_bracket_bus_base():
         # Each expanded key should map to a list (may be empty for unconnected pins)
         for key in ["data<0>", "data<1>"]:
             assert isinstance(result[key], list), f"{key} should map to a list"
+
+
+def test_tracer_lateral_walk_r_thru_c_skip_xtor_endpoint():
+    """Test lateral walk classifications:
+      R/L  -> thru-walk (galvanic)
+      C/K  -> skip entirely (parasitic noise, no step, no walk)
+      other (transistors, sources, ...) -> emit endpoint, no walk
+
+    Synthetic flat netlist with X instances (leaf primitives, no SubcktDef):
+      X1 (net_a, vss) R          -> cell_type="R"     (thru-walk)
+      X2 (net_a, vss) C          -> cell_type="C"     (SKIP -- no step emitted)
+      X3 (net_a, vss) nch_model  -> cell_type="nch_model" (endpoint)
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        deck_path = os.path.join(tmpdir, "test_lateral.sp")
+        with open(deck_path, "w") as f:
+            f.write(".title Test lateral walk: R thru, C skip, transistor endpoint\n")
+            f.write(".subckt top net_a vdd vss\n")
+            f.write("X1 net_a vss R\n")
+            f.write("X2 net_a vss C\n")
+            f.write("X3 net_a vss nch_model\n")
+            f.write(".ends top\n")
+
+        parser = NetlistParser(deck_path)
+        tracer = BidirectionalTracer(parser)
+        paths = tracer.trace("top", "net_a", max_depth=5)
+
+        has_thru_r = False
+        has_endpoint_xtor = False
+        seen_any_c_step = False
+
+        for path in paths:
+            for step in path:
+                if step.direction == "thru" and step.cell == "R":
+                    has_thru_r = True
+                if step.direction == "endpoint" and step.cell == "nch_model":
+                    has_endpoint_xtor = True
+                if step.cell == "C":
+                    seen_any_c_step = True
+
+        assert has_thru_r, (
+            "Expected at least one path with direction='thru' for R (galvanic), "
+            f"but got paths: {[format_path(p) for p in paths]}"
+        )
+        assert has_endpoint_xtor, (
+            "Expected at least one path with direction='endpoint' for transistor "
+            f"cell_type='nch_model', but got paths: {[format_path(p) for p in paths]}"
+        )
+        assert not seen_any_c_step, (
+            "Caps (cell_type='C') should be SKIPPED entirely (parasitic noise); "
+            f"no step of any kind should reference them, but got paths: {[format_path(p) for p in paths]}"
+        )

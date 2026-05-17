@@ -26,11 +26,14 @@
   "source_url": "https://raw.githubusercontent.com/google/skywater-pdk-libs-sky130_fd_sc_hd/main/cells/inv/sky130_fd_sc_hd__inv_1.spice",
   "trace": {
     "max_depth": null,
-    "paths": [],
-    "raw_path_count": 0,
+    "paths": [
+      "sky130_fd_sc_hd__inv_1|<internal>|A -- sky130_fd_pr__nfet_01v8|X0|sky130_fd_pr__nfet_01v8:1",
+      "sky130_fd_sc_hd__inv_1|<internal>|A -- sky130_fd_pr__pfet_01v8_hvt|X1|sky130_fd_pr__pfet_01v8_hvt:1"
+    ],
+    "raw_path_count": 2,
     "start_cell": "sky130_fd_sc_hd__inv_1",
     "start_pin": "A",
-    "unique_path_count": 0
+    "unique_path_count": 2
   },
   "vendored_sha": "ac7fb61f06e6470b94e8afdf7c25268f62fbd7b1"
 }

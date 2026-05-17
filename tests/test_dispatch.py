@@ -98,7 +98,16 @@ endmodule
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
 
-            # Create SPICE definition (rank 2)
+            # Create SPF definition (rank 0 — lowest)
+            spf_file = tmpdir_path / "cell.spf"
+            spf_file.write_text("""
+*|DSPF 1.0
+.SUBCKT INV a b c
+*|NET b 1.0PF
+.ENDS INV
+""")
+
+            # Create SPICE definition (rank 3 — higher) with different pins
             sp_file = tmpdir_path / "cell.sp"
             sp_file.write_text("""
 .subckt INV A B VDD GND
@@ -107,17 +116,10 @@ M2 B A GND GND nch w=1u l=100n
 .ends INV
 """)
 
-            # Create Verilog definition (rank 1) with different pins
-            v_file = tmpdir_path / "cell.v"
-            v_file.write_text("""
-module INV (input A, B, C, output D);
-endmodule
-""")
-
             # Parse the directory
             parser = NetlistParser(tmpdir)
 
-            # INV should have 4 pins from SPICE (rank 2 > verilog rank 1)
+            # INV should have 4 pins from SPICE (rank 3 > spf rank 0)
             assert "INV" in parser.subckts
             spice_inv = parser.subckts["INV"]
             assert len(spice_inv.pins) == 4  # A, B, VDD, GND from SPICE

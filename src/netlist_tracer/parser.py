@@ -25,12 +25,12 @@ _CACHE_SCHEMA_VERSION = 2
 
 # Format priority ranking for collision resolution (higher = wins on name conflict)
 _FORMAT_PRIORITY = {
-    "spf": 5,
-    "spectre": 4,
-    "cdl": 3,
-    "spice": 2,
-    "verilog": 1,
-    "edif": 0,
+    "spectre": 5,
+    "cdl": 4,
+    "spice": 3,
+    "verilog": 2,
+    "edif": 1,
+    "spf": 0,
 }
 
 
